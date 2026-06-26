@@ -1,0 +1,6 @@
+{
+  "name": "MedIntel AI",
+  "description": "Enterprise-grade AI-powered Medical Retrieval-Augmented Generation (RAG) platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

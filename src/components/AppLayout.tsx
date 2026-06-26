@@ -1,0 +1,403 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  LayoutDashboard,
+  FolderOpen,
+  Brain,
+  Search,
+  LineChart,
+  Settings,
+  LifeBuoy,
+  LogOut,
+  Bell,
+  Sun,
+  Moon,
+  Menu,
+  X,
+  User,
+  Activity,
+  ChevronDown,
+  CheckCircle2,
+  ShieldAlert,
+  ArrowLeft
+} from 'lucide-react';
+import { ViewType } from '../types';
+import Logo from './Logo';
+
+// Views
+import DashboardView from './DashboardView';
+import DocumentsView from './DocumentsView';
+import AIAssistantView from './AIAssistantView';
+import MedicalSearchView from './MedicalSearchView';
+import AnalyticsView from './AnalyticsView';
+import SettingsView from './SettingsView';
+import SupportView from './SupportView';
+
+interface AppLayoutProps {
+  onExitPlatform: () => void;
+}
+
+export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
+  const [activeTab, setActiveTab] = useState<Exclude<ViewType, 'landing'>>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const [isDarkThemeLocked, setIsDarkThemeLocked] = useState(true);
+  const [themeFeedback, setThemeFeedback] = useState(false);
+
+  // References
+  const notificationsRef = useRef<HTMLDivElement | null>(null);
+  const profileRef = useRef<HTMLDivElement | null>(null);
+
+  // Close popovers on click outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target as Node)) {
+        setIsNotificationsOpen(false);
+      }
+      if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const navItems = [
+    { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'documents' as const, label: 'Documents', icon: FolderOpen },
+    { id: 'assistant' as const, label: 'AI Assistant', icon: Brain },
+    { id: 'search' as const, label: 'Medical Search', icon: Search },
+    { id: 'analytics' as const, label: 'Analytics', icon: LineChart },
+    { id: 'settings' as const, label: 'Settings', icon: Settings },
+    { id: 'support' as const, label: 'Support', icon: LifeBuoy }
+  ];
+
+  const notifications = [
+    {
+      id: 'n1',
+      title: 'New MRI Record Ingested',
+      desc: 'Pelvis_MRI_Bilateral_Contrast_Review.dicom ready in vector search partition.',
+      time: '15m ago',
+      type: 'success'
+    },
+    {
+      id: 'n2',
+      title: 'Security Sync Notice',
+      desc: 'Decentralized BAA cryptographic keys successfully auto-rotated.',
+      time: '1h ago',
+      type: 'info'
+    },
+    {
+      id: 'n3',
+      title: 'SLA Priority Threshold',
+      desc: 'Mean RAG query latency dropped to 114ms (Optimum limits).',
+      time: '2h ago',
+      type: 'warning'
+    }
+  ];
+
+  const handleThemeToggleClick = () => {
+    setThemeFeedback(true);
+    setTimeout(() => {
+      setThemeFeedback(false);
+    }, 4000);
+  };
+
+  const handleStatNavigation = (view: Exclude<ViewType, 'landing'>) => {
+    setActiveTab(view);
+  };
+
+  return (
+    <div className="min-h-screen z-10 flex select-none text-slate-100 font-sans relative overflow-x-hidden" id="app-platform-layout">
+      
+      {/* 1. Desktop Sidebar */}
+      <aside className="hidden lg:flex flex-col w-64 border-r border-white/5 glass-panel h-screen sticky top-0 shrink-0 z-40 p-4 justify-between">
+        <div className="flex flex-col gap-6">
+          <div className="py-2 border-b border-white/5">
+            <Logo size={32} />
+          </div>
+
+          {/* Navigation Links */}
+          <nav className="flex flex-col gap-1.5" id="desktop-sidebar-navigation">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold tracking-wide uppercase transition-all cursor-pointer ${
+                    isActive
+                      ? 'bg-[#00E5FF]/15 text-[#00E5FF] border border-[#00E5FF]/20 shadow-md shadow-[#00E5FF]/5'
+                      : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <Icon size={16} className={isActive ? 'text-[#00E5FF]' : 'text-slate-400'} />
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* Sidebar Footer options */}
+        <div className="flex flex-col gap-2 pt-4 border-t border-white/5">
+          <button
+            onClick={onExitPlatform}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold uppercase text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+          >
+            <ArrowLeft size={16} />
+            Back to Website
+          </button>
+        </div>
+      </aside>
+
+      {/* 2. Main Content Context Area */}
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen relative">
+        
+        {/* Top Header Navigation */}
+        <header className="sticky top-0 z-30 glass-panel border-b border-white/5 px-6 py-3 flex items-center justify-between backdrop-blur-lg">
+          
+          {/* Left: Mobile menu toggle or mock search */}
+          <div className="flex items-center gap-4 flex-1">
+            <button
+              onClick={() => setIsMobileMenuOpen(true)}
+              className="lg:hidden p-2 rounded-lg bg-slate-900 border border-white/10 text-slate-300 hover:text-white hover:bg-slate-950 transition-all"
+            >
+              <Menu size={18} />
+            </button>
+
+            {/* Simulated quick search drawer trigger */}
+            <div className="relative hidden md:block max-w-xs w-full">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                placeholder="Search console (CMD+K)..."
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                className={`w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-slate-950/40 border text-slate-300 placeholder:text-slate-500 focus:outline-none focus:border-[#00E5FF] transition-all font-mono ${
+                  searchFocused ? 'border-[#00E5FF] w-64' : 'border-white/5'
+                }`}
+              />
+            </div>
+
+            {/* Connection Bridge Status */}
+            <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#14F195]/10 text-[#14F195] border border-[#14F195]/20 text-[10px] font-mono font-bold tracking-wider">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] animate-pulse"></span>
+              EHR GATEWAY SECURE: ACTIVE
+            </span>
+          </div>
+
+          {/* Right Icons: notifications, theme, clinician profile menu */}
+          <div className="flex items-center gap-3">
+            
+            {/* Theme Toggle Placeholder */}
+            <div className="relative">
+              <button
+                onClick={handleThemeToggleClick}
+                className="p-2 rounded-lg bg-slate-900/80 border border-white/5 text-slate-400 hover:text-white transition-all hover:border-white/15 cursor-pointer"
+                title="Theme Configuration"
+              >
+                {isDarkThemeLocked ? <Moon size={15} /> : <Sun size={15} />}
+              </button>
+
+              <AnimatePresence>
+                {themeFeedback && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                    className="absolute right-0 mt-2 p-3 rounded-lg bg-slate-950 border border-[#00E5FF]/20 font-mono text-[10px] text-slate-300 w-48 shadow-xl text-center"
+                  >
+                    💡 <strong className="text-[#00E5FF]">Enterprise Protocol:</strong> Dark theme is strictly locked to prevent eye strain during medical imaging audits.
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Dynamic Notification Popover */}
+            <div className="relative" ref={notificationsRef}>
+              <button
+                onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+                className="p-2 rounded-lg bg-slate-900/80 border border-white/5 text-slate-400 hover:text-white transition-all relative hover:border-white/15 cursor-pointer"
+              >
+                <Bell size={15} />
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-400"></span>
+              </button>
+
+              <AnimatePresence>
+                {isNotificationsOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute right-0 mt-2 w-72 md:w-80 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50"
+                  >
+                    <div className="p-3 bg-slate-950/60 border-b border-white/5 flex justify-between items-center text-xs font-mono">
+                      <span className="font-bold text-white uppercase">System Notifications</span>
+                      <span className="text-[10px] text-[#00E5FF] uppercase font-bold">3 New Alerts</span>
+                    </div>
+
+                    <div className="divide-y divide-white/5">
+                      {notifications.map((n) => (
+                        <div key={n.id} className="p-3 hover:bg-white/5 transition-colors text-xs flex gap-2">
+                          <div className="pt-0.5 shrink-0">
+                            <Activity size={12} className="text-[#00E5FF]" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-white block leading-tight">{n.title}</span>
+                            <span className="text-slate-400 text-[10px] mt-0.5 block leading-relaxed">{n.desc}</span>
+                            <span className="text-[9px] text-slate-600 font-mono mt-1 block">{n.time}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Profile Clinician Menu */}
+            <div className="relative" ref={profileRef}>
+              <button
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-white/5 text-slate-300 hover:text-white hover:border-white/15 transition-all text-xs font-mono cursor-pointer"
+              >
+                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#00E5FF] to-[#7C3AED] flex items-center justify-center text-[10px] font-bold text-slate-950 font-sans">
+                  SL
+                </div>
+                <span className="hidden sm:inline font-semibold">Dr. Sarah Lin, MD</span>
+                <ChevronDown size={12} />
+              </button>
+
+              <AnimatePresence>
+                {isProfileOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute right-0 mt-2 w-56 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 text-xs"
+                  >
+                    <div className="p-3 bg-slate-950/60 border-b border-white/5 font-mono">
+                      <span className="font-bold text-white block">Dr. Sarah Lin</span>
+                      <span className="text-[10px] text-slate-400 mt-0.5 block">Department of Cardiology</span>
+                    </div>
+
+                    <div className="p-2 flex flex-col gap-1 text-slate-300">
+                      <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
+                        <span>Active Role</span>
+                        <span className="text-[10px] bg-[#00E5FF]/10 text-[#00E5FF] font-mono px-2 py-0.5 rounded uppercase font-bold">Admin Clinician</span>
+                      </div>
+                      <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
+                        <span>Sandbox Encryption</span>
+                        <span className="text-[10px] bg-[#14F195]/10 text-[#14F195] font-mono px-2 py-0.5 rounded uppercase font-bold">AES-256</span>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+          </div>
+        </header>
+
+        {/* 3. Main Dynamic Panel Area */}
+        <main className="flex-1 p-6 md:p-8 relative overflow-y-auto no-scrollbar">
+          
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeTab}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.25 }}
+            >
+              {activeTab === 'dashboard' && <DashboardView onNavigateTo={handleStatNavigation} />}
+              {activeTab === 'documents' && <DocumentsView />}
+              {activeTab === 'assistant' && <AIAssistantView />}
+              {activeTab === 'search' && <MedicalSearchView />}
+              {activeTab === 'analytics' && <AnalyticsView />}
+              {activeTab === 'settings' && <SettingsView />}
+              {activeTab === 'support' && <SupportView />}
+            </motion.div>
+          </AnimatePresence>
+
+        </main>
+      </div>
+
+      {/* 4. Responsive Mobile Drawer Navigation Menu */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black z-40 lg:hidden"
+            />
+
+            {/* Sidebar drawer content */}
+            <motion.aside
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ duration: 0.3 }}
+              className="fixed top-0 bottom-0 left-0 w-64 border-r border-white/5 bg-[#07111F] z-50 p-4 flex flex-col justify-between lg:hidden"
+            >
+              <div className="flex flex-col gap-6">
+                <div className="flex justify-between items-center py-2 border-b border-white/5">
+                  <Logo size={28} />
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="p-1.5 rounded-lg bg-slate-900 border border-white/5 text-slate-400"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <nav className="flex flex-col gap-1.5" id="mobile-sidebar-navigation">
+                  {navItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = activeTab === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setIsMobileMenuOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold tracking-wide uppercase transition-all cursor-pointer ${
+                          isActive
+                            ? 'bg-[#00E5FF]/15 text-[#00E5FF] border border-[#00E5FF]/20 shadow-md shadow-[#00E5FF]/5'
+                            : 'text-slate-400 hover:text-white hover:bg-white/5 border border-transparent'
+                        }`}
+                      >
+                        <Icon size={16} className={isActive ? 'text-[#00E5FF]' : 'text-slate-400'} />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </nav>
+              </div>
+
+              <div className="flex flex-col gap-2 pt-4 border-t border-white/5">
+                <button
+                  onClick={onExitPlatform}
+                  className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold uppercase text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                >
+                  <ArrowLeft size={16} />
+                  Back to Website
+                </button>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+    </div>
+  );
+}
