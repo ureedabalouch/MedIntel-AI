@@ -19,10 +19,12 @@ import {
   ChevronDown,
   CheckCircle2,
   ShieldAlert,
-  ArrowLeft
+  ArrowLeft,
+  Database
 } from 'lucide-react';
 import { ViewType } from '../types';
 import Logo from './Logo';
+import { supabaseSim } from '../lib/supabaseSim';
 
 // Views
 import DashboardView from './DashboardView';
@@ -32,6 +34,7 @@ import MedicalSearchView from './MedicalSearchView';
 import AnalyticsView from './AnalyticsView';
 import SettingsView from './SettingsView';
 import SupportView from './SupportView';
+import SupabaseConsoleView from './SupabaseConsoleView';
 
 interface AppLayoutProps {
   onExitPlatform: () => void;
@@ -46,9 +49,32 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
   const [isDarkThemeLocked, setIsDarkThemeLocked] = useState(true);
   const [themeFeedback, setThemeFeedback] = useState(false);
 
+  // Supabase states
+  const [session, setSession] = useState(supabaseSim.getSession());
+  const [userOrgs, setUserOrgs] = useState<any[]>([]);
+  const [isOrgSelectorOpen, setIsOrgSelectorOpen] = useState(false);
+
   // References
   const notificationsRef = useRef<HTMLDivElement | null>(null);
   const profileRef = useRef<HTMLDivElement | null>(null);
+  const orgDropdownRef = useRef<HTMLDivElement | null>(null);
+
+  // Load user organizations
+  const loadUserOrgs = () => {
+    const sess = supabaseSim.getSession();
+    setSession(sess);
+    if (sess?.user) {
+      const raw = supabaseSim.getRawState();
+      const myMemb = raw.memberships.filter((m: any) => m.user_id === sess.user?.id);
+      const myOrgIds = myMemb.map((m: any) => m.organization_id);
+      const myOrgs = raw.organizations.filter((o: any) => myOrgIds.includes(o.id));
+      setUserOrgs(myOrgs);
+    }
+  };
+
+  useEffect(() => {
+    loadUserOrgs();
+  }, [activeTab]);
 
   // Close popovers on click outside
   useEffect(() => {
@@ -58,6 +84,9 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
       }
       if (profileRef.current && !profileRef.current.contains(e.target as Node)) {
         setIsProfileOpen(false);
+      }
+      if (orgDropdownRef.current && !orgDropdownRef.current.contains(e.target as Node)) {
+        setIsOrgSelectorOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -70,6 +99,7 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
     { id: 'assistant' as const, label: 'AI Assistant', icon: Brain },
     { id: 'search' as const, label: 'Medical Search', icon: Search },
     { id: 'analytics' as const, label: 'Analytics', icon: LineChart },
+    { id: 'supabase' as const, label: 'Supabase Console', icon: Database },
     { id: 'settings' as const, label: 'Settings', icon: Settings },
     { id: 'support' as const, label: 'Support', icon: LifeBuoy }
   ];
@@ -145,10 +175,20 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
         {/* Sidebar Footer options */}
         <div className="flex flex-col gap-2 pt-4 border-t border-white/5">
           <button
-            onClick={onExitPlatform}
+            onClick={() => {
+              supabaseSim.signOut();
+              onExitPlatform();
+            }}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-semibold uppercase text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
           >
-            <ArrowLeft size={16} />
+            <LogOut size={16} />
+            Logout Session
+          </button>
+          <button
+            onClick={onExitPlatform}
+            className="w-full flex items-center gap-3 px-4 py-2 rounded-xl text-[10px] font-semibold uppercase text-slate-500 hover:text-white transition-all cursor-pointer"
+          >
+            <ArrowLeft size={14} />
             Back to Website
           </button>
         </div>
@@ -183,11 +223,68 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
               />
             </div>
 
-            {/* Connection Bridge Status */}
-            <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#14F195]/10 text-[#14F195] border border-[#14F195]/20 text-[10px] font-mono font-bold tracking-wider">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] animate-pulse"></span>
-              EHR GATEWAY SECURE: ACTIVE
-            </span>
+            {/* Connection Bridge Status & Org Selector */}
+            <div className="hidden md:flex items-center gap-3 relative" ref={orgDropdownRef}>
+              <span className="hidden xl:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-[#14F195]/10 text-[#14F195] border border-[#14F195]/20 text-[10px] font-mono font-bold tracking-wider">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#14F195] animate-pulse"></span>
+                EHR GATEWAY SECURE
+              </span>
+
+              {/* Active Workspace / Org Dropdown Selector */}
+              <button
+                onClick={() => setIsOrgSelectorOpen(!isOrgSelectorOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900 border border-white/10 text-xs font-mono text-slate-300 hover:text-white cursor-pointer transition-all"
+              >
+                <Database size={12} className="text-[#00E5FF]" />
+                <span className="font-bold uppercase tracking-wider">{session?.activeOrg?.name || 'Mayo Clinic Cardiology'}</span>
+                <ChevronDown size={12} className="text-slate-500" />
+              </button>
+
+              <AnimatePresence>
+                {isOrgSelectorOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className="absolute top-full left-0 mt-2 w-64 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 text-xs font-mono"
+                  >
+                    <div className="p-3 bg-slate-950/80 border-b border-white/5 flex justify-between items-center">
+                      <span className="font-bold text-slate-400">SWITCH WORKSPACE</span>
+                      <span className="text-[9px] bg-[#00E5FF]/10 text-[#00E5FF] px-1.5 py-0.5 rounded font-bold">RLS FILTER</span>
+                    </div>
+                    <div className="p-2 flex flex-col gap-1">
+                      {userOrgs.map((o) => {
+                        const isCurrent = session?.activeOrg?.id === o.id;
+                        return (
+                          <button
+                            key={o.id}
+                            onClick={() => {
+                              supabaseSim.switchActiveOrg(o.id);
+                              loadUserOrgs();
+                              setIsOrgSelectorOpen(false);
+                              // Trigger state update
+                              const event = new CustomEvent('orgSwitched', { detail: o.id });
+                              window.dispatchEvent(event);
+                            }}
+                            className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/5 transition-all flex justify-between items-center ${
+                              isCurrent ? 'bg-[#00E5FF]/10 text-[#00E5FF]' : 'text-slate-300'
+                            }`}
+                          >
+                            <span className="truncate pr-2">{o.name}</span>
+                            {isCurrent && <span className="text-[8px] bg-[#00E5FF]/20 text-[#00E5FF] px-1.5 py-0.5 rounded font-bold">ACTIVE</span>}
+                          </button>
+                        );
+                      })}
+                      {userOrgs.length === 0 && (
+                        <div className="p-3 text-slate-500 italic text-center text-[11px]">
+                          No organizations joined yet.
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
 
           {/* Right Icons: notifications, theme, clinician profile menu */}
@@ -265,10 +362,15 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
                 className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-900/80 border border-white/5 text-slate-300 hover:text-white hover:border-white/15 transition-all text-xs font-mono cursor-pointer"
               >
-                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#00E5FF] to-[#7C3AED] flex items-center justify-center text-[10px] font-bold text-slate-950 font-sans">
-                  SL
+                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-[#00E5FF] to-[#7C3AED] flex items-center justify-center text-[10px] font-bold text-slate-950 font-sans uppercase">
+                  {(() => {
+                    const name = session?.profile?.full_name || 'Dr. Sarah Lin';
+                    const cleanName = name.replace(/^(Dr\.|Dr|Mr\.|Mr|Ms\.|Ms|Mrs\.|Mrs)\s+/i, '').trim();
+                    const parts = cleanName.split(/\s+/);
+                    return parts.length >= 2 ? (parts[0][0] + parts[1][0]).toUpperCase() : name.slice(0, 2).toUpperCase();
+                  })()}
                 </div>
-                <span className="hidden sm:inline font-semibold">Dr. Sarah Lin, MD</span>
+                <span className="hidden sm:inline font-semibold">{session?.profile?.full_name || 'Dr. Sarah Lin'}</span>
                 <ChevronDown size={12} />
               </button>
 
@@ -281,19 +383,31 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                     className="absolute right-0 mt-2 w-56 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 text-xs"
                   >
                     <div className="p-3 bg-slate-950/60 border-b border-white/5 font-mono">
-                      <span className="font-bold text-white block">Dr. Sarah Lin</span>
-                      <span className="text-[10px] text-slate-400 mt-0.5 block">Department of Cardiology</span>
+                      <span className="font-bold text-white block">{session?.profile?.full_name || 'Dr. Sarah Lin'}</span>
+                      <span className="text-[10px] text-slate-400 mt-0.5 block truncate">{session?.user?.email}</span>
                     </div>
 
                     <div className="p-2 flex flex-col gap-1 text-slate-300">
                       <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
                         <span>Active Role</span>
-                        <span className="text-[10px] bg-[#00E5FF]/10 text-[#00E5FF] font-mono px-2 py-0.5 rounded uppercase font-bold">Admin Clinician</span>
+                        <span className="text-[10px] bg-[#00E5FF]/10 text-[#00E5FF] font-mono px-2 py-0.5 rounded uppercase font-bold">
+                          {session?.profile?.role || 'Doctor'}
+                        </span>
                       </div>
                       <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
                         <span>Sandbox Encryption</span>
                         <span className="text-[10px] bg-[#14F195]/10 text-[#14F195] font-mono px-2 py-0.5 rounded uppercase font-bold">AES-256</span>
                       </div>
+                      <button
+                        onClick={() => {
+                          supabaseSim.signOut();
+                          onExitPlatform();
+                        }}
+                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 mt-1 cursor-pointer font-bold"
+                      >
+                        <LogOut size={12} />
+                        <span>Logout Session</span>
+                      </button>
                     </div>
                   </motion.div>
                 )}
@@ -319,6 +433,7 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
               {activeTab === 'assistant' && <AIAssistantView />}
               {activeTab === 'search' && <MedicalSearchView />}
               {activeTab === 'analytics' && <AnalyticsView />}
+              {activeTab === 'supabase' && <SupabaseConsoleView />}
               {activeTab === 'settings' && <SettingsView />}
               {activeTab === 'support' && <SupportView />}
             </motion.div>

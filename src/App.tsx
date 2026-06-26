@@ -3,14 +3,51 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import AIBackground from './components/AIBackground';
 import LandingPage from './components/LandingPage';
 import AppLayout from './components/AppLayout';
+import AuthView from './components/AuthView';
+import OnboardingView from './components/OnboardingView';
+import { supabaseSim } from './lib/supabaseSim';
+
+type MainViewType = 'landing' | 'auth' | 'onboarding' | 'platform';
 
 export default function App() {
-  const [view, setView] = useState<'landing' | 'platform'>('landing');
+  const [view, setView] = useState<MainViewType>('landing');
+
+  // Verify and sync routing on mount
+  useEffect(() => {
+    const session = supabaseSim.getSession();
+    if (session) {
+      if (session.activeOrg) {
+        setView('platform');
+      } else {
+        setView('onboarding');
+      }
+    }
+  }, []);
+
+  const handleLaunchPlatform = () => {
+    const session = supabaseSim.getSession();
+    if (!session) {
+      setView('auth');
+    } else if (!session.activeOrg) {
+      setView('onboarding');
+    } else {
+      setView('platform');
+    }
+  };
+
+  const handleAuthSuccess = () => {
+    const session = supabaseSim.getSession();
+    if (!session?.activeOrg) {
+      setView('onboarding');
+    } else {
+      setView('platform');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#07111F] text-slate-100 selection:bg-[#00E5FF]/30 selection:text-[#00E5FF] relative overflow-hidden" id="medintel-app-root">
@@ -20,24 +57,61 @@ export default function App() {
 
       {/* Primary Routing Container with smooth transitions */}
       <AnimatePresence mode="wait">
-        {view === 'landing' ? (
+        {view === 'landing' && (
           <motion.div
             key="landing-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.3 }}
             className="relative z-10"
           >
-            <LandingPage onLaunchPlatform={() => setView('platform')} />
+            <LandingPage onLaunchPlatform={handleLaunchPlatform} />
           </motion.div>
-        ) : (
+        )}
+
+        {view === 'auth' && (
+          <motion.div
+            key="auth-view"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10"
+          >
+            <AuthView
+              onAuthSuccess={handleAuthSuccess}
+              onBackToLanding={() => setView('landing')}
+            />
+          </motion.div>
+        )}
+
+        {view === 'onboarding' && (
+          <motion.div
+            key="onboarding-view"
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.3 }}
+            className="relative z-10"
+          >
+            <OnboardingView
+              onOnboardingComplete={() => setView('platform')}
+              onLogout={() => {
+                supabaseSim.signOut();
+                setView('landing');
+              }}
+            />
+          </motion.div>
+        )}
+
+        {view === 'platform' && (
           <motion.div
             key="platform-view"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={{ duration: 0.4 }}
+            transition={{ duration: 0.3 }}
             className="relative z-10"
           >
             <AppLayout onExitPlatform={() => setView('landing')} />
