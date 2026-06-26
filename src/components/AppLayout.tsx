@@ -95,7 +95,7 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
 
   const navItems = [
     { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'documents' as const, label: 'Documents', icon: FolderOpen },
+    { id: 'documents' as const, label: 'Knowledge Library', icon: FolderOpen },
     { id: 'assistant' as const, label: 'AI Assistant', icon: Brain },
     { id: 'search' as const, label: 'Medical Search', icon: Search },
     { id: 'analytics' as const, label: 'Analytics', icon: LineChart },

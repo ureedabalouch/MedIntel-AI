@@ -16,25 +16,30 @@ import {
   Plus
 } from 'lucide-react';
 import { DocumentItem, ActivityLog } from '../types';
+import { supabaseSim } from '../lib/supabaseSim';
 
 interface DashboardViewProps {
-  onNavigateTo: (view: 'dashboard' | 'documents' | 'assistant' | 'search' | 'analytics' | 'settings' | 'support') => void;
+  onNavigateTo: (view: 'dashboard' | 'documents' | 'assistant' | 'search' | 'analytics' | 'settings' | 'support' | 'supabase') => void;
 }
 
 export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
+  const session = supabaseSim.getSession();
+  const activeOrg = session?.activeOrg;
+  const docs = activeOrg ? supabaseSim.getDocuments(activeOrg.id) : [];
+
   const stats = [
     {
       title: 'Indexed Health Docs',
-      value: '4,821',
-      change: '+14% this month',
+      value: docs.length.toString(),
+      change: `${activeOrg ? activeOrg.name : 'Isolated Environment'}`,
       isPositive: true,
       icon: FolderOpen,
       color: 'text-[#00E5FF]'
     },
     {
       title: 'Semantic Query Volume',
-      value: '84,103',
-      change: '+22.4% vs last week',
+      value: (docs.length * 14 + 10).toString(),
+      change: 'Dynamic index usage active',
       isPositive: true,
       icon: Search,
       color: 'text-[#7C3AED]'
@@ -50,57 +55,33 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
     {
       title: 'RAG Latency (p99)',
       value: '114ms',
-      change: '-12ms improvement',
+      change: 'Optimum vector speed',
       isPositive: true,
       icon: Clock,
       color: 'text-amber-400'
     }
   ];
 
-  const recentDocs: DocumentItem[] = [
-    {
-      id: 'DOC-8832',
-      title: 'Chest_CT_Scan_Contrast_Sarah_Lin_58F.dicom',
-      type: 'CT Scan',
-      patientId: 'PAT-0094',
-      date: '2026-06-25 18:42',
-      size: '142.4 MB',
-      status: 'Ready',
-      compliance: 'HIPAA compliant'
-    },
-    {
-      id: 'DOC-8831',
-      title: 'Serum_Creatinine_Hematology_Profile_John_Doe_62M.pdf',
-      type: 'Lab Report',
-      patientId: 'PAT-4821',
-      date: '2026-06-25 15:10',
-      size: '2.1 MB',
-      status: 'Ready',
-      compliance: 'HIPAA compliant'
-    },
-    {
-      id: 'DOC-8830',
-      title: 'Genetics_BRCA1_BRCA2_Sequence_Audit.csv',
-      type: 'Genomic Data',
-      patientId: 'PAT-9201',
-      date: '2026-06-24 11:15',
-      size: '48.9 MB',
-      status: 'Indexing',
-      compliance: 'HIPAA compliant'
-    },
-    {
-      id: 'DOC-8829',
-      title: 'Pelvis_MRI_Bilateral_Contrast_Review.dicom',
-      type: 'MRI',
-      patientId: 'PAT-3012',
-      date: '2026-06-24 09:30',
-      size: '210.6 MB',
-      status: 'Ready',
-      compliance: 'HIPAA compliant'
-    }
-  ];
+  const recentDocs = docs.slice(0, 4).map(d => ({
+    id: d.id,
+    title: d.title,
+    type: d.category,
+    patientId: d.patientId || 'N/A',
+    status: d.status,
+    size: d.size,
+    compliance: d.compliance,
+    date: d.date
+  }));
 
-  const activityLogs: ActivityLog[] = [
+  const simLogs = supabaseSim.getLogs();
+  const activityLogs = simLogs.length > 0 ? simLogs.slice(0, 4).map((l, idx) => ({
+    id: `LOG-${idx}`,
+    timestamp: l.timestamp,
+    action: l.details,
+    user: l.action === 'DB_INITIALIZATION' ? 'System Bridge' : l.action,
+    category: (l.action.includes('DOC') ? 'Doc Ingest' : l.action.includes('AUTH') ? 'Auth' : 'System') as any,
+    status: (l.type === 'ERROR' || l.type === 'WARNING' ? 'Warning' : 'Success') as any
+  })) : [
     {
       id: 'LOG-1',
       timestamp: 'Just now',
@@ -108,30 +89,6 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
       user: 'Dr. Sarah Lin, MD',
       category: 'RAG Query',
       status: 'Success'
-    },
-    {
-      id: 'LOG-2',
-      timestamp: '14m ago',
-      action: 'Ingested Chest_CT_Scan_Contrast_Sarah_Lin_58F.dicom into clinical index',
-      user: 'Automated Ingest Bridge',
-      category: 'Doc Ingest',
-      status: 'Success'
-    },
-    {
-      id: 'LOG-3',
-      timestamp: '45m ago',
-      action: 'Vector partition optimization sequence complete (Region: us-east1)',
-      user: 'System Core Engine',
-      category: 'System',
-      status: 'Success'
-    },
-    {
-      id: 'LOG-4',
-      timestamp: '1h 12m ago',
-      action: 'Unauthorized API route call rejected (Access key invalid)',
-      user: 'IP: 198.51.100.42',
-      category: 'Auth',
-      status: 'Warning'
     }
   ];
 

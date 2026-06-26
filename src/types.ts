@@ -44,12 +44,26 @@ export interface Membership {
 export interface DocumentItem {
   id: string;
   title: string;
-  type: 'MRI' | 'CT Scan' | 'Lab Report' | 'Genomic Data' | 'Clinical Notes';
-  patientId: string;
+  description: string;
+  category: string;
+  tags: string[];
+  organization_id: string;
+  uploaded_by: string;
+  uploaded_by_id: string;
   date: string;
+  last_modified: string;
   size: string;
-  status: 'Ready' | 'Indexing' | 'Failed';
+  file_type: string;
+  version: string;
+  status: 'Ready' | 'Indexing' | 'Failed' | 'Draft';
   compliance: 'HIPAA compliant' | 'GDPR compliant';
+  patientId?: string;
+}
+
+export interface CustomCategory {
+  id: string;
+  name: string;
+  organization_id: string | null; // null for system defaults, string for organization-specific custom ones
 }
 
 export interface ActivityLog {

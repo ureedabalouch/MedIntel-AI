@@ -1,4 +1,4 @@
-import { Profile, Organization, Membership, User, UserRole, OrgType, MemberRole } from '../types';
+import { Profile, Organization, Membership, User, UserRole, OrgType, MemberRole, DocumentItem, CustomCategory } from '../types';
 
 // Let's define the interface for the simulated database state
 interface DbState {
@@ -6,6 +6,8 @@ interface DbState {
   profiles: Profile[];
   organizations: Organization[];
   memberships: Membership[];
+  documents: DocumentItem[];
+  categories: CustomCategory[];
   session: {
     user: User | null;
     profile: Profile | null;
@@ -105,6 +107,127 @@ const MOCK_RLS_DOCUMENTS: RLSDocument[] = [
   { id: 'doc-4', title: 'Oncology BRCA1 Pathway Map Vectors', type: 'Genomic Data', organization_id: 'org-stanford-genomics', confidentiality: 'Standard', uploaded_by: 'Dr. James Carter' }
 ];
 
+export const DEFAULT_CATEGORIES: CustomCategory[] = [
+  { id: 'cat-cg', name: 'Clinical Guidelines', organization_id: null },
+  { id: 'cat-rp', name: 'Research Papers', organization_id: null },
+  { id: 'cat-hs', name: 'Hospital SOPs', organization_id: null },
+  { id: 'cat-pe', name: 'Patient Education', organization_id: null },
+  { id: 'cat-mb', name: 'Medical Books', organization_id: null },
+  { id: 'cat-dr', name: 'Drug References', organization_id: null },
+  { id: 'cat-ar', name: 'Archived', organization_id: null }
+];
+
+export const DEFAULT_DOCUMENTS: DocumentItem[] = [
+  {
+    id: 'DOC-8832',
+    title: 'Chest_CT_Scan_Contrast_Sarah_Lin_58F.dicom',
+    description: 'Chest high-resolution CT scan mapping cardiac and pulmonary margins with contrast agent.',
+    category: 'Clinical Guidelines',
+    tags: ['Cardiology', 'CT Scan', 'Pulmonary', 'Contrast'],
+    organization_id: 'org-mayo-cardiology',
+    uploaded_by: 'Dr. Sarah Lin, MD',
+    uploaded_by_id: 'user-sarah-lin',
+    date: '2026-06-25 18:42',
+    last_modified: '2026-06-25 18:42',
+    size: '142.4 MB',
+    file_type: 'DICOM',
+    version: '1.0.0',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-0094'
+  },
+  {
+    id: 'DOC-8831',
+    title: 'Serum_Creatinine_Hematology_Profile_John_Doe_62M.pdf',
+    description: 'Comprehensive blood panel indicating renal clearance, creatinine clearance rates, and electrolyte balances.',
+    category: 'Clinical Guidelines',
+    tags: ['Lab Report', 'Hematology', 'Renal Panel', 'Creatinine'],
+    organization_id: 'org-mayo-cardiology',
+    uploaded_by: 'Dr. Sarah Lin, MD',
+    uploaded_by_id: 'user-sarah-lin',
+    date: '2026-06-25 15:10',
+    last_modified: '2026-06-25 15:10',
+    size: '2.1 MB',
+    file_type: 'PDF',
+    version: '1.0.0',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-4821'
+  },
+  {
+    id: 'DOC-8830',
+    title: 'Genetics_BRCA1_BRCA2_Sequence_Audit.csv',
+    description: 'Targeted NGS sequence audit maps mutations on BRCA locus with clinical risk calculations.',
+    category: 'Research Papers',
+    tags: ['Genomics', 'BRCA1', 'BRCA2', 'NextGen Sequencing'],
+    organization_id: 'org-stanford-genomics',
+    uploaded_by: 'Dr. James Carter, PhD',
+    uploaded_by_id: 'user-james-carter',
+    date: '2026-06-24 11:15',
+    last_modified: '2026-06-24 11:15',
+    size: '48.9 MB',
+    file_type: 'CSV',
+    version: '1.0.1',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-9201'
+  },
+  {
+    id: 'DOC-8829',
+    title: 'Pelvis_MRI_Bilateral_Contrast_Review.dicom',
+    description: 'Dual-phase magnetic resonance image sequence of pelvic structure.',
+    category: 'Clinical Guidelines',
+    tags: ['MRI', 'Pelvic', 'Radiology'],
+    organization_id: 'org-mayo-cardiology',
+    uploaded_by: 'Dr. Sarah Lin, MD',
+    uploaded_by_id: 'user-sarah-lin',
+    date: '2026-06-24 09:30',
+    last_modified: '2026-06-24 09:30',
+    size: '210.6 MB',
+    file_type: 'DICOM',
+    version: '1.0.0',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-3012'
+  },
+  {
+    id: 'DOC-8828',
+    title: 'Pharmacogenomics_Warfarin_Metabolism_Cytochrome_Audit.xlsx',
+    description: 'Excel audit logs evaluating warfarin dosing models with CYP2C9 and VKORC1 genetic inputs.',
+    category: 'Drug References',
+    tags: ['Pharmacogenomics', 'Warfarin', 'Cytochrome', 'CYP2C9'],
+    organization_id: 'org-stanford-genomics',
+    uploaded_by: 'Dr. James Carter, PhD',
+    uploaded_by_id: 'user-james-carter',
+    date: '2026-06-23 16:55',
+    last_modified: '2026-06-23 16:55',
+    size: '12.4 MB',
+    file_type: 'XLSX',
+    version: '1.1.0',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-1102'
+  },
+  {
+    id: 'DOC-8827',
+    title: 'Pediatric_Asthma_Treatment_History_Vance_7M.pdf',
+    description: 'Clinical narrative timeline tracking pediatric rescue inhaler compliance and spirometry values.',
+    category: 'Patient Education',
+    tags: ['Pediatric', 'Asthma', 'Clinical Notes', 'Inhaler'],
+    organization_id: 'org-mayo-cardiology',
+    uploaded_by: 'Dr. Sarah Lin, MD',
+    uploaded_by_id: 'user-sarah-lin',
+    date: '2026-06-23 13:20',
+    last_modified: '2026-06-23 13:20',
+    size: '3.4 MB',
+    file_type: 'PDF',
+    version: '1.0.0',
+    status: 'Ready',
+    compliance: 'HIPAA compliant',
+    patientId: 'PAT-8831'
+  }
+];
+
 class SupabaseSimulator {
   private state: DbState;
 
@@ -121,6 +244,13 @@ class SupabaseSimulator {
         if (!parsed.users || parsed.users.length === 0) {
           return this.getInitialState();
         }
+        // Lazy migrations for existing simulated state databases
+        if (!parsed.documents) {
+          parsed.documents = [...DEFAULT_DOCUMENTS];
+        }
+        if (!parsed.categories) {
+          parsed.categories = [...DEFAULT_CATEGORIES];
+        }
         return parsed;
       } catch (e) {
         return this.getInitialState();
@@ -135,6 +265,8 @@ class SupabaseSimulator {
       profiles: [...DEFAULT_PROFILES],
       organizations: [...DEFAULT_ORGS],
       memberships: [...DEFAULT_MEMBERSHIPS],
+      documents: [...DEFAULT_DOCUMENTS],
+      categories: [...DEFAULT_CATEGORIES],
       session: {
         user: DEFAULT_USERS[0],
         profile: DEFAULT_PROFILES[0],
@@ -156,6 +288,161 @@ class SupabaseSimulator {
   private save(state: DbState = this.state) {
     this.state = state;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  // --- Knowledge Library Operations ---
+
+  public getDocuments(orgId: string): DocumentItem[] {
+    // SECURITY ISOLATION: Strict check so users never see other organization files!
+    return this.state.documents.filter(doc => doc.organization_id === orgId);
+  }
+
+  public getCategories(orgId: string): CustomCategory[] {
+    // Returns system categories (orgId is null) + custom categories for this org
+    return this.state.categories.filter(cat => cat.organization_id === null || cat.organization_id === orgId);
+  }
+
+  public addDocument(doc: Omit<DocumentItem, 'id' | 'date' | 'last_modified'>) {
+    const id = 'DOC-' + Math.floor(1000 + Math.random() * 9000);
+    const nowStr = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    
+    const newDoc: DocumentItem = {
+      ...doc,
+      id,
+      date: nowStr,
+      last_modified: nowStr
+    };
+
+    this.state.documents.unshift(newDoc);
+    this.save();
+    
+    this.logAction(
+      'DOC_UPLOAD_SUCCESS',
+      'SUCCESS',
+      `Securely ingested & verified '${newDoc.title}' [Size: ${newDoc.size}, Format: ${newDoc.file_type}] belonging to Org context ${newDoc.organization_id}`
+    );
+
+    return newDoc;
+  }
+
+  public renameDocument(docId: string, orgId: string, newTitle: string) {
+    const index = this.state.documents.findIndex(d => d.id === docId && d.organization_id === orgId);
+    if (index === -1) {
+      throw new Error("Document not found in organization context.");
+    }
+
+    const oldTitle = this.state.documents[index].title;
+    this.state.documents[index].title = newTitle;
+    this.state.documents[index].last_modified = new Date().toISOString().replace('T', ' ').substring(0, 16);
+    this.save();
+
+    this.logAction(
+      'DOC_RENAME',
+      'INFO',
+      `Renamed document from '${oldTitle}' to '${newTitle}' [ID: ${docId}]`
+    );
+
+    return this.state.documents[index];
+  }
+
+  public updateDocumentMetadata(docId: string, orgId: string, updates: Partial<DocumentItem>) {
+    const index = this.state.documents.findIndex(d => d.id === docId && d.organization_id === orgId);
+    if (index === -1) {
+      throw new Error("Document not found in organization context.");
+    }
+
+    const original = this.state.documents[index];
+    this.state.documents[index] = {
+      ...original,
+      ...updates,
+      last_modified: new Date().toISOString().replace('T', ' ').substring(0, 16)
+    };
+    
+    this.save();
+    this.logAction(
+      'DOC_UPDATE_METADATA',
+      'INFO',
+      `Updated metadata parameters for document '${original.title}'`
+    );
+
+    return this.state.documents[index];
+  }
+
+  public deleteDocument(docId: string, orgId: string) {
+    const index = this.state.documents.findIndex(d => d.id === docId && d.organization_id === orgId);
+    if (index === -1) {
+      throw new Error("Document not found in organization context.");
+    }
+
+    const doc = this.state.documents[index];
+    this.state.documents.splice(index, 1);
+    this.save();
+
+    this.logAction(
+      'DOC_DELETE',
+      'WARNING',
+      `Deregistered and purged document '${doc.title}' [ID: ${docId}] from vector storage partition.`
+    );
+
+    return true;
+  }
+
+  public addCategory(name: string, orgId: string) {
+    // Check if category name already exists (either system-wide or for this org)
+    const exists = this.state.categories.some(
+      c => c.name.toLowerCase() === name.toLowerCase() && (c.organization_id === null || c.organization_id === orgId)
+    );
+
+    if (exists) {
+      throw new Error(`Category '${name}' already exists.`);
+    }
+
+    const id = 'cat-' + Math.random().toString(36).substring(2, 11);
+    const newCategory: CustomCategory = {
+      id,
+      name,
+      organization_id: orgId
+    };
+
+    this.state.categories.push(newCategory);
+    this.save();
+
+    this.logAction(
+      'CATEGORY_CREATE',
+      'SUCCESS',
+      `Administrator created custom clinical category '${name}' for organization ${orgId}.`
+    );
+
+    return newCategory;
+  }
+
+  public deleteCategory(categoryId: string, orgId: string) {
+    const index = this.state.categories.findIndex(c => c.id === categoryId && c.organization_id === orgId);
+    if (index === -1) {
+      throw new Error("Custom category not found or belongs to system defaults.");
+    }
+
+    const categoryName = this.state.categories[index].name;
+    this.state.categories.splice(index, 1);
+
+    // Re-assign any documents with this category to system default 'Clinical Guidelines'
+    let reassignedCount = 0;
+    this.state.documents.forEach(doc => {
+      if (doc.category === categoryName && doc.organization_id === orgId) {
+        doc.category = 'Clinical Guidelines';
+        reassignedCount++;
+      }
+    });
+
+    this.save();
+
+    this.logAction(
+      'CATEGORY_DELETE',
+      'WARNING',
+      `Purged custom category '${categoryName}' and remapped ${reassignedCount} documents to default 'Clinical Guidelines'.`
+    );
+
+    return true;
   }
 
   public getRawState(): DbState {
