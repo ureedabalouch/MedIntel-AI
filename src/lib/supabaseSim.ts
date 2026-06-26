@@ -1,4 +1,5 @@
 import { Profile, Organization, Membership, User, UserRole, OrgType, MemberRole, DocumentItem, CustomCategory } from '../types';
+import { getSupabaseClient } from './supabase';
 
 // Let's define the interface for the simulated database state
 interface DbState {
@@ -233,6 +234,85 @@ class SupabaseSimulator {
 
   constructor() {
     this.state = this.loadState();
+    this.initSupabaseAuth();
+  }
+
+  private async initSupabaseAuth() {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    // Listen for auth state changes using the official Supabase SDK
+    supabase.auth.onAuthStateChange(async (event, sbSession) => {
+      if (sbSession) {
+        const sbUser = sbSession.user;
+        const user: User = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          created_at: sbUser.created_at
+        };
+
+        const metadata = sbUser.user_metadata || {};
+        const profile: Profile = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          full_name: metadata.full_name || metadata.fullName || 'Authorized User',
+          role: (metadata.role as UserRole) || 'Doctor',
+          avatar_url: metadata.avatar_url || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
+          created_at: sbUser.created_at
+        };
+
+        let activeOrg: Organization | null = this.state.session?.activeOrg || null;
+        if (!activeOrg && this.state.organizations.length > 0) {
+          activeOrg = this.state.organizations[0];
+        }
+
+        this.state.session = {
+          user,
+          profile,
+          activeOrg
+        };
+      } else {
+        this.state.session = null;
+      }
+      this.save();
+    });
+
+    // Fetch initial session
+    try {
+      const { data: { session: sbSession } } = await supabase.auth.getSession();
+      if (sbSession) {
+        const sbUser = sbSession.user;
+        const user: User = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          created_at: sbUser.created_at
+        };
+
+        const metadata = sbUser.user_metadata || {};
+        const profile: Profile = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          full_name: metadata.full_name || metadata.fullName || 'Authorized User',
+          role: (metadata.role as UserRole) || 'Doctor',
+          avatar_url: metadata.avatar_url || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
+          created_at: sbUser.created_at
+        };
+
+        let activeOrg: Organization | null = this.state.session?.activeOrg || null;
+        if (!activeOrg && this.state.organizations.length > 0) {
+          activeOrg = this.state.organizations[0];
+        }
+
+        this.state.session = {
+          user,
+          profile,
+          activeOrg
+        };
+        this.save();
+      }
+    } catch (e) {
+      console.error('Error fetching initial Supabase session:', e);
+    }
   }
 
   private loadState(): DbState {
@@ -480,99 +560,303 @@ class SupabaseSimulator {
   }
 
   // Auth Operations
-  public signUp(email: string, fullName: string, role: UserRole) {
-    // Check if email already exists
-    const existing = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (existing) {
-      this.logAction('AUTH_SIGNUP_FAIL', 'ERROR', `Sign up failed. Email ${email} already has an registered account.`);
-      throw new Error('User with this email already exists.');
+  public async signUp(email: string, fullName: string, role: UserRole, password?: string) {
+    const supabase = getSupabaseClient();
+    if (supabase && password) {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+            role: role
+          }
+        }
+      });
+
+      if (error) {
+        this.logAction('AUTH_SIGNUP_FAIL', 'ERROR', `Sign up failed for ${email}: ${error.message}`);
+        throw error;
+      }
+
+      this.logAction('AUTH_SIGNUP_PENDING', 'WARNING', `Auth user ${email} created. Awaiting email verification.`);
+      
+      const user: User = {
+        id: data.user?.id || 'temp',
+        email: email,
+        created_at: data.user?.created_at || new Date().toISOString()
+      };
+
+      const profile: Profile = {
+        id: data.user?.id || 'temp',
+        email: email,
+        full_name: fullName,
+        role: role,
+        created_at: data.user?.created_at || new Date().toISOString()
+      };
+
+      return { user, profile };
+    } else {
+      // Check if email already exists
+      const existing = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (existing) {
+        this.logAction('AUTH_SIGNUP_FAIL', 'ERROR', `Sign up failed. Email ${email} already has an registered account.`);
+        throw new Error('User with this email already exists.');
+      }
+
+      const userId = 'user-' + Math.random().toString(36).substring(2, 11);
+      const newUser: User = {
+        id: userId,
+        email: email,
+        created_at: new Date().toISOString()
+      };
+
+      const newProfile: Profile = {
+        id: userId,
+        email: email,
+        full_name: fullName,
+        role: role,
+        created_at: new Date().toISOString()
+      };
+
+      this.state.users.push(newUser);
+      this.state.profiles.push(newProfile);
+      this.save();
+
+      this.logAction('AUTH_SIGNUP_PENDING', 'WARNING', `Auth user ${email} created. Awaiting email verification.`);
+      return { user: newUser, profile: newProfile };
     }
-
-    const userId = 'user-' + Math.random().toString(36).substring(2, 11);
-    const newUser: User = {
-      id: userId,
-      email: email,
-      created_at: new Date().toISOString()
-    };
-
-    const newProfile: Profile = {
-      id: userId,
-      email: email,
-      full_name: fullName,
-      role: role,
-      created_at: new Date().toISOString()
-    };
-
-    this.state.users.push(newUser);
-    this.state.profiles.push(newProfile);
-    this.save();
-
-    this.logAction('AUTH_SIGNUP_PENDING', 'WARNING', `Auth user ${email} created. Awaiting email verification.`);
-    return { user: newUser, profile: newProfile };
   }
 
-  public verifyEmail(email: string) {
-    const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    const profile = this.state.profiles.find(p => p.id === user?.id);
-    if (!user || !profile) {
-      throw new Error('User verification failed. No matching user email.');
-    }
+  public async verifyEmail(email: string, token?: string) {
+    const supabase = getSupabaseClient();
+    if (supabase && token) {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email,
+        token,
+        type: 'signup'
+      });
+      if (error) {
+        this.logAction('AUTH_EMAIL_VERIFY_FAIL', 'ERROR', `Verification failed for ${email}: ${error.message}`);
+        throw error;
+      }
 
-    this.logAction('AUTH_EMAIL_VERIFIED', 'SUCCESS', `User ${email} verified their email securely. Auth Token generated.`);
-    return { user, profile };
+      const sbUser = data.user;
+      if (!sbUser) {
+        throw new Error('Verification succeeded but no user details returned.');
+      }
+
+      const user: User = {
+        id: sbUser.id,
+        email: sbUser.email || '',
+        created_at: sbUser.created_at
+      };
+
+      const metadata = sbUser.user_metadata || {};
+      const profile: Profile = {
+        id: sbUser.id,
+        email: sbUser.email || '',
+        full_name: metadata.full_name || metadata.fullName || 'Authorized User',
+        role: (metadata.role as UserRole) || 'Doctor',
+        avatar_url: metadata.avatar_url || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
+        created_at: sbUser.created_at
+      };
+
+      // Since organizations are mocked for now, find or create activeOrg context
+      let activeOrg: Organization | null = this.state.session?.activeOrg || null;
+      if (!activeOrg && this.state.organizations.length > 0) {
+        activeOrg = this.state.organizations[0];
+      }
+
+      this.state.session = {
+        user,
+        profile,
+        activeOrg
+      };
+      this.save();
+
+      this.logAction('AUTH_EMAIL_VERIFIED', 'SUCCESS', `User ${email} verified their email securely. Auth Token generated.`);
+      return { user, profile };
+    } else {
+      const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      const profile = this.state.profiles.find(p => p.id === user?.id);
+      if (!user || !profile) {
+        throw new Error('User verification failed. No matching user email.');
+      }
+
+      this.logAction('AUTH_EMAIL_VERIFIED', 'SUCCESS', `User ${email} verified their email securely. Auth Token generated.`);
+      return { user, profile };
+    }
   }
 
-  public signIn(email: string) {
-    const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    const profile = this.state.profiles.find(p => p.id === user?.id);
+  public async signIn(email: string, password?: string) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      
+      // If we are already signed in as the correct user (e.g. verified OTP), just use that session
+      if (currentSession && currentSession.user.email?.toLowerCase() === email.toLowerCase()) {
+        const sbUser = currentSession.user;
+        const user: User = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          created_at: sbUser.created_at
+        };
 
-    if (!user || !profile) {
-      this.logAction('AUTH_SIGNIN_FAIL', 'ERROR', `Invalid email sign in attempt: ${email}`);
-      throw new Error('No user found with this email. Please sign up.');
+        const metadata = sbUser.user_metadata || {};
+        const profile: Profile = {
+          id: sbUser.id,
+          email: sbUser.email || '',
+          full_name: metadata.full_name || metadata.fullName || 'Authorized User',
+          role: (metadata.role as UserRole) || 'Doctor',
+          avatar_url: metadata.avatar_url || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
+          created_at: sbUser.created_at
+        };
+
+        let activeOrg: Organization | null = this.state.session?.activeOrg || null;
+        if (!activeOrg && this.state.organizations.length > 0) {
+          activeOrg = this.state.organizations[0];
+        }
+
+        this.state.session = {
+          user,
+          profile,
+          activeOrg
+        };
+        this.save();
+        return this.state.session;
+      }
+
+      if (!password) {
+        throw new Error('Password is required for login.');
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (error) {
+        this.logAction('AUTH_SIGNIN_FAIL', 'ERROR', `Invalid credentials for ${email}: ${error.message}`);
+        throw error;
+      }
+
+      const sbUser = data.user;
+      if (!sbUser) {
+        throw new Error('Login succeeded but no user details returned.');
+      }
+
+      const user: User = {
+        id: sbUser.id,
+        email: sbUser.email || '',
+        created_at: sbUser.created_at
+      };
+
+      const metadata = sbUser.user_metadata || {};
+      const profile: Profile = {
+        id: sbUser.id,
+        email: sbUser.email || '',
+        full_name: metadata.full_name || metadata.fullName || 'Authorized User',
+        role: (metadata.role as UserRole) || 'Doctor',
+        avatar_url: metadata.avatar_url || 'https://images.unsplash.com/photo-1559839734-2b71ea197ec2?auto=format&fit=crop&q=80&w=200',
+        created_at: sbUser.created_at
+      };
+
+      // Since organizations are mocked for now, map activeOrg context
+      let activeOrg: Organization | null = this.state.session?.activeOrg || null;
+      if (!activeOrg && this.state.organizations.length > 0) {
+        activeOrg = this.state.organizations[0];
+      }
+
+      this.state.session = {
+        user,
+        profile,
+        activeOrg
+      };
+      this.save();
+
+      this.logAction('AUTH_SIGNIN_SUCCESS', 'SUCCESS', `Session authorized for ${email}. Connected Org: ${activeOrg?.name || 'None'}`);
+      return this.state.session;
+    } else {
+      const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      const profile = this.state.profiles.find(p => p.id === user?.id);
+
+      if (!user || !profile) {
+        this.logAction('AUTH_SIGNIN_FAIL', 'ERROR', `Invalid email sign in attempt: ${email}`);
+        throw new Error('No user found with this email. Please sign up.');
+      }
+
+      // Load active organization or personal workspace
+      const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+      let activeOrg: Organization | null = null;
+      if (userMemberships.length > 0) {
+        // get organization
+        const orgId = userMemberships[0].organization_id;
+        activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
+      }
+
+      this.state.session = {
+        user,
+        profile,
+        activeOrg
+      };
+      this.save();
+
+      this.logAction('AUTH_SIGNIN_SUCCESS', 'SUCCESS', `Session authorized for ${email}. Connected Org: ${activeOrg?.name || 'None (Awaiting Onboarding)'}`);
+      return this.state.session;
     }
-
-    // Load active organization or personal workspace
-    const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
-    let activeOrg: Organization | null = null;
-    if (userMemberships.length > 0) {
-      // get organization
-      const orgId = userMemberships[0].organization_id;
-      activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
-    }
-
-    this.state.session = {
-      user,
-      profile,
-      activeOrg
-    };
-    this.save();
-
-    this.logAction('AUTH_SIGNIN_SUCCESS', 'SUCCESS', `Session authorized for ${email}. Connected Org: ${activeOrg?.name || 'None (Awaiting Onboarding)'}`);
-    return this.state.session;
   }
 
-  public signOut() {
+  public async signOut() {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     const previousUser = this.state.session?.user?.email;
     this.state.session = null;
     this.save();
     this.logAction('AUTH_SIGNOUT', 'INFO', `User session explicitly invalidated. Previous: ${previousUser}`);
   }
 
-  public forgotPassword(email: string) {
-    const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) {
-      this.logAction('AUTH_RESET_REQUEST_FAIL', 'ERROR', `Password reset requested for non-existing email: ${email}`);
-      throw new Error('Email address not registered.');
+  public async forgotPassword(email: string) {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin
+      });
+      if (error) {
+        this.logAction('AUTH_RESET_REQUEST_FAIL', 'ERROR', `Password reset request failed: ${error.message}`);
+        throw error;
+      }
+      this.logAction('AUTH_RESET_REQUEST', 'WARNING', `Supabase Auth sent password reset token link to ${email}.`);
+    } else {
+      const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (!user) {
+        this.logAction('AUTH_RESET_REQUEST_FAIL', 'ERROR', `Password reset requested for non-existing email: ${email}`);
+        throw new Error('Email address not registered.');
+      }
+      this.logAction('AUTH_RESET_REQUEST', 'WARNING', `Supabase Auth sent password reset token link to ${email}.`);
     }
-    this.logAction('AUTH_RESET_REQUEST', 'WARNING', `Supabase Auth sent password reset token link to ${email}.`);
   }
 
-  public resetPassword(email: string) {
-    const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-    if (!user) {
-      throw new Error('Password reset failed. Invalid user session.');
+  public async resetPassword(email: string, newPassword?: string) {
+    const supabase = getSupabaseClient();
+    if (supabase && newPassword) {
+      const { error } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      if (error) {
+        this.logAction('AUTH_RESET_FAIL', 'ERROR', `Password update failed: ${error.message}`);
+        throw error;
+      }
+      this.logAction('AUTH_RESET_SUCCESS', 'SUCCESS', `Password successfully updated for user ${email}. Secure token regenerated.`);
+    } else {
+      const user = this.state.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+      if (!user) {
+        throw new Error('Password reset failed. Invalid user session.');
+      }
+      this.logAction('AUTH_RESET_SUCCESS', 'SUCCESS', `Password successfully updated for user ${email}. Secure token regenerated.`);
     }
-    this.logAction('AUTH_RESET_SUCCESS', 'SUCCESS', `Password successfully updated for user ${email}. Secure token regenerated.`);
   }
 
   // Organization Operations

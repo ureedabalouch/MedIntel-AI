@@ -65,9 +65,9 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        const session = supabaseSim.signIn(email);
+        await supabaseSim.signIn(email, password);
         setIsLoading(false);
         onAuthSuccess();
       } catch (err: any) {
@@ -99,9 +99,9 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        supabaseSim.signUp(email, fullName, clinicalRole);
+        await supabaseSim.signUp(email, fullName, clinicalRole, password);
         setIsLoading(false);
         setInfoMessage(`We've sent a 6-digit confirmation pin to ${email}.`);
         setMode('verify');
@@ -122,15 +122,15 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        supabaseSim.verifyEmail(email);
-        supabaseSim.signIn(email); // automatically sign in on verify
+        await supabaseSim.verifyEmail(email, verificationCode);
+        await supabaseSim.signIn(email, password); // automatically sign in on verify
         setIsLoading(false);
         onAuthSuccess();
       } catch (err: any) {
         setIsLoading(false);
-        setErrorMessage('Invalid confirmation code. Try 123456 as a default sandbox pin.');
+        setErrorMessage(err.message || 'Invalid confirmation code. Try 123456 as a default sandbox pin.');
       }
     }, 1200);
   };
@@ -145,9 +145,9 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        supabaseSim.forgotPassword(email);
+        await supabaseSim.forgotPassword(email);
         setIsLoading(false);
         setInfoMessage('A secure recovery token has been routed to your email address.');
         setMode('reset');
@@ -172,9 +172,9 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        supabaseSim.resetPassword(email);
+        await supabaseSim.resetPassword(email, password);
         setIsLoading(false);
         setInfoMessage('Your master password was successfully reset. Please sign in now.');
         setMode('login');
