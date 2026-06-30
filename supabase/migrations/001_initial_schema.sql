@@ -1,8 +1,9 @@
 -- MedIntel AI - Production Database Schema (Part 1: Core Identity & Multi-Tenancy)
 -- Compatible with Supabase PostgreSQL (Postgres 15+)
 
--- Enable UUID generation extension
+-- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 --------------------------------------------------------------------------------
 -- 1. PROFILES (Extends Supabase auth.users)
@@ -10,10 +11,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS public.profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     email TEXT UNIQUE NOT NULL,
-    full_name TEXT,
+    full_name VARCHAR(255),
     avatar_url TEXT,
-    job_title TEXT,
-    specialization TEXT,
+    job_title VARCHAR(255),
+    specialization VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -30,11 +31,12 @@ CREATE TABLE IF NOT EXISTS public.organizations (
     slug TEXT UNIQUE NOT NULL,
     description TEXT,
     logo_url TEXT,
-    website TEXT,
+    website VARCHAR(255),
     organization_type TEXT NOT NULL DEFAULT 'Other',
     billing_plan TEXT NOT NULL DEFAULT 'Free',
     timezone TEXT DEFAULT 'UTC',
     created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     
@@ -68,7 +70,7 @@ CREATE TABLE IF NOT EXISTS public.memberships (
     user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
     role TEXT NOT NULL DEFAULT 'Member',
     invited_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
-    joined_at TIMESTAMPTZ,
+    joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     
@@ -105,16 +107,19 @@ END;
 $$ language 'plpgsql';
 
 -- Triggers to automatically maintain updated_at on modify
+DROP TRIGGER IF EXISTS trigger_profiles_updated_at ON public.profiles;
 CREATE TRIGGER trigger_profiles_updated_at 
     BEFORE UPDATE ON public.profiles 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trigger_organizations_updated_at ON public.organizations;
 CREATE TRIGGER trigger_organizations_updated_at 
     BEFORE UPDATE ON public.organizations 
     FOR EACH ROW 
     EXECUTE FUNCTION update_updated_at_column();
 
+DROP TRIGGER IF EXISTS trigger_memberships_updated_at ON public.memberships;
 CREATE TRIGGER trigger_memberships_updated_at 
     BEFORE UPDATE ON public.memberships 
     FOR EACH ROW 
