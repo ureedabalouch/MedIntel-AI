@@ -13,8 +13,11 @@ CREATE TABLE IF NOT EXISTS public.chat_sessions (
     model_name VARCHAR(100) DEFAULT 'gemini-2.5-pro',
     conversation_mode VARCHAR(30) NOT NULL DEFAULT 'hybrid',
     system_prompt TEXT,
+    temperature NUMERIC(3,2),
+    max_tokens INTEGER,
     is_pinned BOOLEAN NOT NULL DEFAULT FALSE,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     last_message_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -46,8 +49,10 @@ CREATE TABLE IF NOT EXISTS public.messages (
     input_tokens INTEGER,
     output_tokens INTEGER,
     latency_ms INTEGER,
+    response_time_ms INTEGER,
     model_name VARCHAR(100),
     feedback SMALLINT,
+    edited_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- Check constraint for allowed message roles
@@ -69,6 +74,11 @@ CREATE INDEX IF NOT EXISTS idx_messages_created_at ON public.messages(created_at
 -- GIN indexes for low-latency JSON extraction (caching, citations lookup, and telemetry analysis)
 CREATE INDEX IF NOT EXISTS idx_messages_metadata_gin ON public.messages USING gin (metadata);
 CREATE INDEX IF NOT EXISTS idx_messages_citations_gin ON public.messages USING gin (citations);
+
+-- GIN index for full-text search on message content
+CREATE INDEX IF NOT EXISTS idx_messages_content_search
+ON public.messages
+USING GIN (to_tsvector('english', content));
 
 --------------------------------------------------------------------------------
 -- UPDATED_AT TIMESTAMP TRIGGER
