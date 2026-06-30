@@ -82,17 +82,21 @@ COMMENT ON FUNCTION public.is_org_admin(UUID) IS 'Securely determines if the cur
 -- Explicitly revoke public execution permissions and grant only to authenticated roles
 REVOKE EXECUTE ON FUNCTION public.is_org_member(UUID) FROM public;
 REVOKE EXECUTE ON FUNCTION public.is_org_member(UUID) FROM anon;
-GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated, service_role;
 
 REVOKE EXECUTE ON FUNCTION public.is_org_admin(UUID) FROM public;
 REVOKE EXECUTE ON FUNCTION public.is_org_admin(UUID) FROM anon;
-GRANT EXECUTE ON FUNCTION public.is_org_admin(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_org_admin(UUID) TO authenticated, service_role;
 
 --------------------------------------------------------------------------------
 -- 1. PROFILES RLS POLICIES
 --------------------------------------------------------------------------------
 -- RLS is enabled to ensure users can only see and manipulate their own personal records.
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.profiles FORCE ROW LEVEL SECURITY;
 
 -- Select own profile
 DROP POLICY IF EXISTS profiles_select_own ON public.profiles;
@@ -121,6 +125,10 @@ CREATE POLICY profiles_update_own ON public.profiles
 --------------------------------------------------------------------------------
 -- Multi-tenant isolation is enforced at the organization level.
 ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.organizations FORCE ROW LEVEL SECURITY;
 
 -- Select member organizations (Members can view organizations they belong to)
 DROP POLICY IF EXISTS organizations_select ON public.organizations;
@@ -157,6 +165,10 @@ CREATE POLICY organizations_delete ON public.organizations
 -- Access controls for managing member lists inside an organization.
 ALTER TABLE public.memberships ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.memberships FORCE ROW LEVEL SECURITY;
+
 -- Select memberships (Any member can retrieve the list of other members in their organization)
 DROP POLICY IF EXISTS memberships_select ON public.memberships;
 CREATE POLICY memberships_select ON public.memberships
@@ -192,6 +204,10 @@ CREATE POLICY memberships_delete ON public.memberships
 -- Categories group documents for organized medical searching and retrieval.
 ALTER TABLE public.document_categories ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.document_categories FORCE ROW LEVEL SECURITY;
+
 -- Select document categories (All organization members can view categories)
 DROP POLICY IF EXISTS document_categories_select ON public.document_categories;
 CREATE POLICY document_categories_select ON public.document_categories
@@ -216,7 +232,7 @@ CREATE POLICY document_categories_update ON public.document_categories
 
 -- Delete document categories (Restricted strictly to organization admins)
 DROP POLICY IF EXISTS document_categories_delete ON public.document_categories;
-CREATE POLICY delete_document_categories ON public.document_categories
+CREATE POLICY document_categories_delete ON public.document_categories
     FOR DELETE
     TO authenticated
     USING (public.is_org_admin(organization_id));
@@ -226,6 +242,10 @@ CREATE POLICY delete_document_categories ON public.document_categories
 --------------------------------------------------------------------------------
 -- Standard and sensitive clinical files. Multi-tenant partitioning is crucial.
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.documents FORCE ROW LEVEL SECURITY;
 
 -- Select documents (Any organization member can search or read documents)
 DROP POLICY IF EXISTS documents_select ON public.documents;
@@ -262,6 +282,10 @@ CREATE POLICY documents_delete ON public.documents
 -- Asynchronous worker jobs executing embeddings generation and clinical parsing.
 ALTER TABLE public.processing_jobs ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.processing_jobs FORCE ROW LEVEL SECURITY;
+
 -- Select processing jobs (Members can view current parsing state)
 DROP POLICY IF EXISTS processing_jobs_select ON public.processing_jobs;
 CREATE POLICY processing_jobs_select ON public.processing_jobs
@@ -297,6 +321,10 @@ CREATE POLICY processing_jobs_delete ON public.processing_jobs
 -- Chat histories between clinic members and the MedIntel AI agent.
 ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.chat_sessions FORCE ROW LEVEL SECURITY;
+
 -- Select chat sessions (User must be member of the org AND must own the chat history)
 DROP POLICY IF EXISTS chat_sessions_select ON public.chat_sessions;
 CREATE POLICY chat_sessions_select ON public.chat_sessions
@@ -331,6 +359,10 @@ CREATE POLICY chat_sessions_delete ON public.chat_sessions
 --------------------------------------------------------------------------------
 -- Individual messaging transcripts.
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.messages FORCE ROW LEVEL SECURITY;
 
 -- Select messages (Must belong to a chat session the logged-in user owns within their org)
 DROP POLICY IF EXISTS messages_select ON public.messages;
@@ -407,6 +439,10 @@ CREATE POLICY messages_delete ON public.messages
 -- Chunked portions of documents stored with high-dimensional vector embeddings.
 ALTER TABLE public.document_chunks ENABLE ROW LEVEL SECURITY;
 
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.document_chunks FORCE ROW LEVEL SECURITY;
+
 -- Select document chunks (Organization members can query and search the index semantically)
 DROP POLICY IF EXISTS document_chunks_select ON public.document_chunks;
 CREATE POLICY document_chunks_select ON public.document_chunks
@@ -447,6 +483,10 @@ CREATE POLICY document_chunks_delete ON public.document_chunks
 --    to edit or delete compliance rows via RLS.
 -- 2. SELECT and INSERT are partitioned strictly by organization membership.
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- FORCE ROW LEVEL SECURITY guarantees that even table owners cannot accidentally
+-- bypass RLS controls unless they are database superusers. This prevents local owner leaks.
+ALTER TABLE public.audit_logs FORCE ROW LEVEL SECURITY;
 
 -- Select audit logs (Only registered members can view the organization compliance records)
 DROP POLICY IF EXISTS audit_logs_select ON public.audit_logs;
