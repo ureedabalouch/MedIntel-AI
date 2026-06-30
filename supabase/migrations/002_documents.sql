@@ -36,9 +36,13 @@ CREATE TABLE IF NOT EXISTS public.documents (
     mime_type VARCHAR(100),
     file_size BIGINT,
     page_count INTEGER,
-    checksum VARCHAR(64),
-    language VARCHAR(10) DEFAULT 'en',
+    checksum VARCHAR(64) UNIQUE,
+    language VARCHAR(20) DEFAULT 'en',
     status VARCHAR(50) NOT NULL DEFAULT 'uploaded',
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    version INTEGER NOT NULL DEFAULT 1,
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    last_accessed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -71,6 +75,7 @@ CREATE TABLE IF NOT EXISTS public.processing_jobs (
     error_message TEXT,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
+    processing_time_ms BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
