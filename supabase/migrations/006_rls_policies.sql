@@ -79,7 +79,7 @@ $$;
 COMMENT ON FUNCTION public.is_org_member(UUID) IS 'Securely determines if the currently authenticated user is a registered member of the given organization. Executed with elevated privileges via SECURITY DEFINER to bypass recursive policy evaluation.';
 COMMENT ON FUNCTION public.is_org_admin(UUID) IS 'Securely determines if the currently authenticated user is an Owner or Administrator of the given organization. Executed with elevated privileges via SECURITY DEFINER to bypass recursive policy evaluation.';
 
--- Explicitly revoke public execution permissions and grant only to authenticated roles
+-- Explicitly revoke public execution permissions and grant only to authenticated roles & service_role
 REVOKE EXECUTE ON FUNCTION public.is_org_member(UUID) FROM public;
 REVOKE EXECUTE ON FUNCTION public.is_org_member(UUID) FROM anon;
 GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated, service_role;
@@ -501,3 +501,72 @@ CREATE POLICY audit_logs_insert ON public.audit_logs
     FOR INSERT
     TO authenticated
     WITH CHECK (public.is_org_member(organization_id) AND user_id = auth.uid());
+
+--------------------------------------------------------------------------------
+-- 11. STORAGE BUCKET RLS POLICIES (medical-documents)
+--------------------------------------------------------------------------------
+-- Enforce Row Level Security on storage.objects to protect medical files.
+-- This restricts direct access to raw clinical assets stored within Supabase Storage.
+-- We do NOT enable FORCE ROW LEVEL SECURITY on storage tables as doing so can conflict
+-- with internal background cleanup processes managed by Supabase storage services.
+ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+
+-- Select objects
+-- Allows authenticated users to download files from the 'medical-documents' bucket
+-- if they are a registered member of the organization that owns the document.
+DROP POLICY IF EXISTS storage_objects_select ON storage.objects;
+CREATE POLICY storage_objects_select ON storage.objects
+    FOR SELECT
+    TO authenticated
+    USING (
+        bucket_id = 'medical-documents'
+        AND EXISTS (
+            SELECT 1 
+            FROM public.documents d
+            WHERE d.storage_path = name
+              AND public.is_org_member(d.organization_id)
+        )
+    );
+
+-- Insert objects
+-- Allows authenticated users to upload new files to the 'medical-documents' bucket.
+-- To maintain strict multi-tenant isolation, the file path must be prefixed with 
+-- the tenant's organization_id, and the user must be a member of that organization.
+DROP POLICY IF EXISTS storage_objects_insert ON storage.objects;
+CREATE POLICY storage_objects_insert ON storage.objects
+    FOR INSERT
+    TO authenticated
+    WITH CHECK (
+        bucket_id = 'medical-documents'
+        AND split_part(name, '/', 1) ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        AND public.is_org_member(CAST(split_part(name, '/', 1) AS UUID))
+    );
+
+-- Update objects
+-- Allows organization administrators to update or overwrite files in the bucket.
+DROP POLICY IF EXISTS storage_objects_update ON storage.objects;
+CREATE POLICY storage_objects_update ON storage.objects
+    FOR UPDATE
+    TO authenticated
+    USING (
+        bucket_id = 'medical-documents'
+        AND split_part(name, '/', 1) ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        AND public.is_org_admin(CAST(split_part(name, '/', 1) AS UUID))
+    )
+    WITH CHECK (
+        bucket_id = 'medical-documents'
+        AND split_part(name, '/', 1) ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        AND public.is_org_admin(CAST(split_part(name, '/', 1) AS UUID))
+    );
+
+-- Delete objects
+-- Allows organization administrators to delete files in the bucket.
+DROP POLICY IF EXISTS storage_objects_delete ON storage.objects;
+CREATE POLICY storage_objects_delete ON storage.objects
+    FOR DELETE
+    TO authenticated
+    USING (
+        bucket_id = 'medical-documents'
+        AND split_part(name, '/', 1) ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        AND public.is_org_admin(CAST(split_part(name, '/', 1) AS UUID))
+    );
