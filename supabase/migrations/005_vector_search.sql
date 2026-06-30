@@ -17,8 +17,13 @@ CREATE TABLE IF NOT EXISTS public.document_chunks (
     content TEXT NOT NULL,
     token_count INTEGER,
     embedding vector(1536),
+    processing_version VARCHAR(50),
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- Enforce that each document can only have one chunk with the same chunk_index
+    CONSTRAINT uq_document_chunk_index UNIQUE (document_id, chunk_index)
 );
 
 -- Comments on tables and columns for database documentation and observability
@@ -32,8 +37,10 @@ COMMENT ON COLUMN public.document_chunks.section_title IS 'The section or chapte
 COMMENT ON COLUMN public.document_chunks.content IS 'The raw text content of the chunk.';
 COMMENT ON COLUMN public.document_chunks.token_count IS 'The number of tokens within the text chunk (useful for LLM window calculations).';
 COMMENT ON COLUMN public.document_chunks.embedding IS 'The 1536-dimensional vector embedding of the content (compatible with standard models like OpenAI text-embedding-3-small or Gemini embeddings).';
+COMMENT ON COLUMN public.document_chunks.processing_version IS 'Specifies the model version or embedding algorithm used to generate this chunk''s vector (e.g., gemini-embedding-001).';
 COMMENT ON COLUMN public.document_chunks.metadata IS 'Flexible JSON container for storing ingestion telemetry, chunk sources, or custom pipeline attributes.';
 COMMENT ON COLUMN public.document_chunks.created_at IS 'Timestamp of when the chunk was processed and stored.';
+COMMENT ON COLUMN public.document_chunks.updated_at IS 'Timestamp of when the chunk was last modified or regenerated.';
 
 --------------------------------------------------------------------------------
 -- 2. INDEXES & PERFORMANCE OPTIMIZATIONS
@@ -46,8 +53,24 @@ CREATE INDEX IF NOT EXISTS idx_document_chunks_chunk_index ON public.document_ch
 -- GIN index for rapid metadata searches and querying nested JSON parameters
 CREATE INDEX IF NOT EXISTS idx_document_chunks_metadata_gin ON public.document_chunks USING gin (metadata);
 
+-- Full Text Search GIN index on text content to support lexical lookup alongside semantic search
+CREATE INDEX IF NOT EXISTS idx_document_chunks_content_search
+ON public.document_chunks
+USING GIN (to_tsvector('english', content));
+
 -- HNSW (Hierarchical Navigable Small World) index for high-performance approximate nearest neighbor (ANN) vector search.
 -- It is optimized using cosine similarity (vector_cosine_ops).
 CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding_hnsw
 ON public.document_chunks
 USING hnsw (embedding vector_cosine_ops);
+
+--------------------------------------------------------------------------------
+-- 3. UPDATED_AT TIMESTAMP TRIGGER
+--------------------------------------------------------------------------------
+-- Apply trigger helper from 001_initial_schema.sql to automatically manage updated_at on change
+
+DROP TRIGGER IF EXISTS trigger_document_chunks_updated_at ON public.document_chunks;
+CREATE TRIGGER trigger_document_chunks_updated_at
+BEFORE UPDATE ON public.document_chunks
+FOR EACH ROW
+EXECUTE FUNCTION update_updated_at_column();
