@@ -28,6 +28,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(create
 --------------------------------------------------------------------------------
 -- By utilizing SECURITY DEFINER, these functions execute with elevated privileges (bypassing RLS),
 -- which solves the classic RLS self-referential infinite recursion loop in Supabase.
+-- SET search_path is explicitly set to public for optimal security and search path scoping.
 
 -- Helper 1: Verify organization membership for the currently logged-in user
 CREATE OR REPLACE FUNCTION public.is_org_member(org_id UUID)
@@ -39,7 +40,7 @@ BEGIN
         AND user_id = auth.uid()
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Helper 2: Verify administrative privileges (Owner or Admin) for the logged-in user in an organization
 CREATE OR REPLACE FUNCTION public.is_org_admin(org_id UUID)
@@ -52,7 +53,18 @@ BEGIN
         AND role IN ('Owner', 'Admin')
     );
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+-- Explanatory comments on helper functions for documentation and observability
+COMMENT ON FUNCTION public.is_org_member(UUID) IS 'Securely determines if the currently authenticated user is a registered member of the given organization.';
+COMMENT ON FUNCTION public.is_org_admin(UUID) IS 'Securely determines if the currently authenticated user is an Owner or Administrator of the given organization.';
+
+-- Explicitly revoke public execution permissions and grant only to authenticated roles
+REVOKE EXECUTE ON FUNCTION public.is_org_member(UUID) FROM public;
+GRANT EXECUTE ON FUNCTION public.is_org_member(UUID) TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.is_org_admin(UUID) FROM public;
+GRANT EXECUTE ON FUNCTION public.is_org_admin(UUID) TO authenticated;
 
 --------------------------------------------------------------------------------
 -- 1. PROFILES RLS POLICIES
@@ -154,102 +166,102 @@ CREATE POLICY delete_memberships ON public.memberships
 --------------------------------------------------------------------------------
 ALTER TABLE public.document_categories ENABLE ROW LEVEL SECURITY;
 
--- Select document categories
+-- Select document categories (Members only)
 DROP POLICY IF EXISTS select_document_categories ON public.document_categories;
 CREATE POLICY select_document_categories ON public.document_categories
     FOR SELECT
     TO authenticated
     USING (public.is_org_member(organization_id));
 
--- Insert document categories
+-- Insert document categories (Admin only)
 DROP POLICY IF EXISTS insert_document_categories ON public.document_categories;
 CREATE POLICY insert_document_categories ON public.document_categories
     FOR INSERT
     TO authenticated
-    WITH CHECK (public.is_org_member(organization_id));
+    WITH CHECK (public.is_org_admin(organization_id));
 
--- Update document categories
+-- Update document categories (Admin only)
 DROP POLICY IF EXISTS update_document_categories ON public.document_categories;
 CREATE POLICY update_document_categories ON public.document_categories
     FOR UPDATE
     TO authenticated
-    USING (public.is_org_member(organization_id))
-    WITH CHECK (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));
 
--- Delete document categories
+-- Delete document categories (Admin only)
 DROP POLICY IF EXISTS delete_document_categories ON public.document_categories;
 CREATE POLICY delete_document_categories ON public.document_categories
     FOR DELETE
     TO authenticated
-    USING (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id));
 
 --------------------------------------------------------------------------------
 -- 5. DOCUMENTS RLS POLICIES
 --------------------------------------------------------------------------------
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 
--- Select documents
+-- Select documents (Members only)
 DROP POLICY IF EXISTS select_documents ON public.documents;
 CREATE POLICY select_documents ON public.documents
     FOR SELECT
     TO authenticated
     USING (public.is_org_member(organization_id));
 
--- Insert documents
+-- Insert documents (Members can upload/create documents)
 DROP POLICY IF EXISTS insert_documents ON public.documents;
 CREATE POLICY insert_documents ON public.documents
     FOR INSERT
     TO authenticated
     WITH CHECK (public.is_org_member(organization_id));
 
--- Update documents
+-- Update documents (Admin only)
 DROP POLICY IF EXISTS update_documents ON public.documents;
 CREATE POLICY update_documents ON public.documents
     FOR UPDATE
     TO authenticated
-    USING (public.is_org_member(organization_id))
-    WITH CHECK (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));
 
--- Delete documents
+-- Delete documents (Admin only)
 DROP POLICY IF EXISTS delete_documents ON public.documents;
 CREATE POLICY delete_documents ON public.documents
     FOR DELETE
     TO authenticated
-    USING (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id));
 
 --------------------------------------------------------------------------------
 -- 6. PROCESSING JOBS RLS POLICIES
 --------------------------------------------------------------------------------
 ALTER TABLE public.processing_jobs ENABLE ROW LEVEL SECURITY;
 
--- Select processing jobs
+-- Select processing jobs (Members only)
 DROP POLICY IF EXISTS select_processing_jobs ON public.processing_jobs;
 CREATE POLICY select_processing_jobs ON public.processing_jobs
     FOR SELECT
     TO authenticated
     USING (public.is_org_member(organization_id));
 
--- Insert processing jobs
+-- Insert processing jobs (Members can initiate processing jobs)
 DROP POLICY IF EXISTS insert_processing_jobs ON public.processing_jobs;
 CREATE POLICY insert_processing_jobs ON public.processing_jobs
     FOR INSERT
     TO authenticated
     WITH CHECK (public.is_org_member(organization_id));
 
--- Update processing jobs
+-- Update processing jobs (Admin only)
 DROP POLICY IF EXISTS update_processing_jobs ON public.processing_jobs;
 CREATE POLICY update_processing_jobs ON public.processing_jobs
     FOR UPDATE
     TO authenticated
-    USING (public.is_org_member(organization_id))
-    WITH CHECK (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));
 
--- Delete processing jobs
+-- Delete processing jobs (Admin only)
 DROP POLICY IF EXISTS delete_processing_jobs ON public.processing_jobs;
 CREATE POLICY delete_processing_jobs ON public.processing_jobs
     FOR DELETE
     TO authenticated
-    USING (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id));
 
 --------------------------------------------------------------------------------
 -- 7. CHAT SESSIONS RLS POLICIES
@@ -359,34 +371,34 @@ CREATE POLICY delete_messages ON public.messages
 --------------------------------------------------------------------------------
 ALTER TABLE public.document_chunks ENABLE ROW LEVEL SECURITY;
 
--- Select document chunks
+-- Select document chunks (Members only)
 DROP POLICY IF EXISTS select_document_chunks ON public.document_chunks;
 CREATE POLICY select_document_chunks ON public.document_chunks
     FOR SELECT
     TO authenticated
     USING (public.is_org_member(organization_id));
 
--- Insert document chunks
+-- Insert document chunks (Members/Ingestion system can create chunks)
 DROP POLICY IF EXISTS insert_document_chunks ON public.document_chunks;
 CREATE POLICY insert_document_chunks ON public.document_chunks
     FOR INSERT
     TO authenticated
     WITH CHECK (public.is_org_member(organization_id));
 
--- Update document chunks
+-- Update document chunks (Admin only)
 DROP POLICY IF EXISTS update_document_chunks ON public.document_chunks;
 CREATE POLICY update_document_chunks ON public.document_chunks
     FOR UPDATE
     TO authenticated
-    USING (public.is_org_member(organization_id))
-    WITH CHECK (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id))
+    WITH CHECK (public.is_org_admin(organization_id));
 
--- Delete document chunks
+-- Delete document chunks (Admin only)
 DROP POLICY IF EXISTS delete_document_chunks ON public.document_chunks;
 CREATE POLICY delete_document_chunks ON public.document_chunks
     FOR DELETE
     TO authenticated
-    USING (public.is_org_member(organization_id));
+    USING (public.is_org_admin(organization_id));
 
 --------------------------------------------------------------------------------
 -- 10. AUDIT LOGS RLS POLICIES (Append-only & Read-only for HIPAA compliance)
