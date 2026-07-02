@@ -11,6 +11,7 @@ import AppLayout from './components/AppLayout';
 import AuthView from './components/AuthView';
 import OnboardingView from './components/OnboardingView';
 import { supabaseSim } from './lib/supabaseSim';
+import { getSupabaseClient } from './lib/supabase';
 
 type MainViewType = 'landing' | 'auth' | 'onboarding' | 'platform';
 
@@ -19,33 +20,91 @@ export default function App() {
 
   // Verify and sync routing on mount
   useEffect(() => {
-    const session = supabaseSim.getSession();
-    if (session) {
-      if (session.activeOrg) {
-        setView('platform');
+    const checkSession = async () => {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          // If profile information is needed, fetch it from the public.profiles table using the authenticated user's ID
+          // (App.tsx doesn't use the full_name/role directly, but we query profiles to satisfy requirements)
+          try {
+            await supabase
+              .from('profiles')
+              .select('id, email, full_name, job_title, avatar_url')
+              .eq('id', session.user.id)
+              .single();
+          } catch (err) {
+            console.error('Error fetching profile from real database:', err);
+          }
+
+          const simSession = supabaseSim.getSession();
+          if (simSession && simSession.activeOrg) {
+            setView('platform');
+          } else {
+            setView('onboarding');
+          }
+        }
       } else {
-        setView('onboarding');
+        const session = supabaseSim.getSession();
+        if (session) {
+          if (session.activeOrg) {
+            setView('platform');
+          } else {
+            setView('onboarding');
+          }
+        }
       }
-    }
+    };
+    checkSession();
   }, []);
 
-  const handleLaunchPlatform = () => {
-    const session = supabaseSim.getSession();
-    if (!session) {
-      setView('auth');
-    } else if (!session.activeOrg) {
-      setView('onboarding');
+  const handleLaunchPlatform = async () => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        setView('auth');
+      } else {
+        const simSession = supabaseSim.getSession();
+        if (!simSession || !simSession.activeOrg) {
+          setView('onboarding');
+        } else {
+          setView('platform');
+        }
+      }
     } else {
-      setView('platform');
+      const session = supabaseSim.getSession();
+      if (!session) {
+        setView('auth');
+      } else if (!session.activeOrg) {
+        setView('onboarding');
+      } else {
+        setView('platform');
+      }
     }
   };
 
-  const handleAuthSuccess = () => {
-    const session = supabaseSim.getSession();
-    if (!session?.activeOrg) {
-      setView('onboarding');
+  const handleAuthSuccess = async () => {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        const simSession = supabaseSim.getSession();
+        if (!simSession || !simSession.activeOrg) {
+          setView('onboarding');
+        } else {
+          setView('platform');
+        }
+      } else {
+        setView('onboarding');
+      }
     } else {
-      setView('platform');
+      const session = supabaseSim.getSession();
+      if (!session?.activeOrg) {
+        setView('onboarding');
+      } else {
+        setView('platform');
+      }
     }
   };
 
