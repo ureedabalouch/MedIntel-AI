@@ -188,7 +188,13 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
 
     setTimeout(async () => {
       try {
-        await supabaseSim.forgotPassword(email);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+        } else {
+          await supabaseSim.forgotPassword(email);
+        }
         setIsLoading(false);
         setInfoMessage('A secure recovery token has been routed to your email address.');
         setMode('reset');
