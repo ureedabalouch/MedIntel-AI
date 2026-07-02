@@ -111,7 +111,22 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
 
     setTimeout(async () => {
       try {
-        await supabaseSim.signUp(email, fullName, clinicalRole, password);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              data: {
+                full_name: fullName,
+                role: clinicalRole
+              }
+            }
+          });
+          if (error) throw error;
+        } else {
+          await supabaseSim.signUp(email, fullName, clinicalRole, password);
+        }
         setIsLoading(false);
         setInfoMessage(`We've sent a 6-digit confirmation pin to ${email}.`);
         setMode('verify');
