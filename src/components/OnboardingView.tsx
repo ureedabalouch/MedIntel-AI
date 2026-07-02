@@ -17,6 +17,7 @@ import {
   LogOut
 } from 'lucide-react';
 import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
 import { OrgType, UserRole } from '../types';
 import Logo from './Logo';
 
@@ -74,11 +75,23 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         // Enforce clinical role selection in the profile to ensure compliance alignment
-        if (session?.profile) {
-          session.profile.role = selectedRole;
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ job_title: selectedRole })
+            .eq('id', session?.user?.id || '');
+          if (error) throw error;
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
+        } else {
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
         }
 
         const { organization } = supabaseSim.createOrganization(
@@ -112,11 +125,23 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
     setIsLoading(true);
     setErrorMessage('');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
         // Enforce selected clinical role
-        if (session?.profile) {
-          session.profile.role = selectedRole;
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ job_title: selectedRole })
+            .eq('id', session?.user?.id || '');
+          if (error) throw error;
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
+        } else {
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
         }
 
         const targetOrg = supabaseSim.joinOrganizationByCode(joinCode);
@@ -139,10 +164,22 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
     const workspaceName = `${session?.profile?.full_name || 'Personal'}'s Workspace`;
     const workspaceSlug = `${session?.user?.email?.split('@')[0] || 'user'}-personal`;
 
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
-        if (session?.profile) {
-          session.profile.role = selectedRole;
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase
+            .from('profiles')
+            .update({ job_title: selectedRole })
+            .eq('id', session?.user?.id || '');
+          if (error) throw error;
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
+        } else {
+          if (session?.profile) {
+            session.profile.role = selectedRole;
+          }
         }
 
         const { organization } = supabaseSim.createOrganization(
