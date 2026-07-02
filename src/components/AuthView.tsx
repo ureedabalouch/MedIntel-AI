@@ -16,6 +16,7 @@ import {
   Clock
 } from 'lucide-react';
 import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
 import { UserRole } from '../types';
 import Logo from './Logo';
 
@@ -67,7 +68,16 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
 
     setTimeout(async () => {
       try {
-        await supabaseSim.signIn(email, password);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+          if (error) throw error;
+        } else {
+          await supabaseSim.signIn(email, password);
+        }
         setIsLoading(false);
         onAuthSuccess();
       } catch (err: any) {
