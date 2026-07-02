@@ -221,7 +221,15 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
 
     setTimeout(async () => {
       try {
-        await supabaseSim.resetPassword(email, password);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error } = await supabase.auth.updateUser({
+            password: password
+          });
+          if (error) throw error;
+        } else {
+          await supabaseSim.resetPassword(email, password);
+        }
         setIsLoading(false);
         setInfoMessage('Your master password was successfully reset. Please sign in now.');
         setMode('login');
