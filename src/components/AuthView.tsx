@@ -149,8 +149,24 @@ export default function AuthView({ onAuthSuccess, onBackToLanding }: AuthViewPro
 
     setTimeout(async () => {
       try {
-        await supabaseSim.verifyEmail(email, verificationCode);
-        await supabaseSim.signIn(email, password); // automatically sign in on verify
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          const { error: verifyError } = await supabase.auth.verifyOtp({
+            email,
+            token: verificationCode,
+            type: 'signup'
+          });
+          if (verifyError) throw verifyError;
+
+          const { error: signInError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+          });
+          if (signInError) throw signInError;
+        } else {
+          await supabaseSim.verifyEmail(email, verificationCode);
+          await supabaseSim.signIn(email, password); // automatically sign in on verify
+        }
         setIsLoading(false);
         onAuthSuccess();
       } catch (err: any) {
