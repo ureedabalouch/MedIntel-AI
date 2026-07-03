@@ -162,6 +162,45 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
           if (session?.profile) {
             session.profile.role = selectedRole;
           }
+
+          // Search organization by slug column
+          const { data: orgData, error: orgSearchError } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('slug', joinCode.trim())
+            .maybeSingle();
+
+          if (orgSearchError) throw orgSearchError;
+          if (!orgData) {
+            throw new Error('No organization found with this invitation code or slug.');
+          }
+
+          // Check if already a member in DB to avoid duplicates
+          const { data: existingMembership, error: checkError } = await supabase
+            .from('memberships')
+            .select('*')
+            .eq('organization_id', orgData.id)
+            .eq('user_id', session?.user?.id || '')
+            .maybeSingle();
+          if (checkError) throw checkError;
+
+          if (!existingMembership) {
+            let dbRole = 'Member';
+            if (selectedRole === 'Administrator') {
+              dbRole = 'Admin';
+            } else if (['Doctor', 'Researcher', 'Nurse'].includes(selectedRole)) {
+              dbRole = selectedRole;
+            }
+
+            const { error: memError } = await supabase
+              .from('memberships')
+              .insert({
+                organization_id: orgData.id,
+                user_id: session?.user?.id,
+                role: dbRole
+              });
+            if (memError) throw memError;
+          }
         } else {
           if (session?.profile) {
             session.profile.role = selectedRole;
