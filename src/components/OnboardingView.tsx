@@ -80,14 +80,38 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
         // Enforce clinical role selection in the profile to ensure compliance alignment
         const supabase = getSupabaseClient();
         if (supabase) {
-          const { error } = await supabase
+          const { error: profileError } = await supabase
             .from('profiles')
             .update({ job_title: selectedRole })
             .eq('id', session?.user?.id || '');
-          if (error) throw error;
+          if (profileError) throw profileError;
           if (session?.profile) {
             session.profile.role = selectedRole;
           }
+
+          // Insert organization in real DB
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .insert({
+              name: orgName,
+              slug: orgSlug,
+              organization_type: orgType,
+              timezone: orgTimezone,
+              created_by: session?.user?.id
+            })
+            .select('id')
+            .single();
+          if (orgError) throw orgError;
+
+          // Insert membership in real DB
+          const { error: memError } = await supabase
+            .from('memberships')
+            .insert({
+              organization_id: orgData.id,
+              user_id: session?.user?.id,
+              role: 'Owner'
+            });
+          if (memError) throw memError;
         } else {
           if (session?.profile) {
             session.profile.role = selectedRole;
@@ -168,14 +192,38 @@ export default function OnboardingView({ onOnboardingComplete, onLogout }: Onboa
       try {
         const supabase = getSupabaseClient();
         if (supabase) {
-          const { error } = await supabase
+          const { error: profileError } = await supabase
             .from('profiles')
             .update({ job_title: selectedRole })
             .eq('id', session?.user?.id || '');
-          if (error) throw error;
+          if (profileError) throw profileError;
           if (session?.profile) {
             session.profile.role = selectedRole;
           }
+
+          // Insert organization in real DB
+          const { data: orgData, error: orgError } = await supabase
+            .from('organizations')
+            .insert({
+              name: workspaceName,
+              slug: workspaceSlug,
+              organization_type: 'Other',
+              timezone: 'UTC',
+              created_by: session?.user?.id
+            })
+            .select('id')
+            .single();
+          if (orgError) throw orgError;
+
+          // Insert membership in real DB
+          const { error: memError } = await supabase
+            .from('memberships')
+            .insert({
+              organization_id: orgData.id,
+              user_id: session?.user?.id,
+              role: 'Owner'
+            });
+          if (memError) throw memError;
         } else {
           if (session?.profile) {
             session.profile.role = selectedRole;
