@@ -87,7 +87,27 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
               .in('id', orgIds);
             if (orgsError) throw orgsError;
 
-            setUserOrgs(orgs || []);
+            const fetchedOrgs = orgs || [];
+            setUserOrgs(fetchedOrgs);
+
+            // Determine active organization for real Supabase
+            let activeRealOrg = null;
+            const savedOrgId = localStorage.getItem('medintel_real_active_org_id');
+            if (savedOrgId) {
+              activeRealOrg = fetchedOrgs.find(o => o.id === savedOrgId) || null;
+            }
+            if (!activeRealOrg && sess?.activeOrg) {
+              activeRealOrg = fetchedOrgs.find(o => o.slug === sess.activeOrg.slug) || null;
+            }
+            if (!activeRealOrg && fetchedOrgs.length > 0) {
+              activeRealOrg = fetchedOrgs[0];
+            }
+
+            if (activeRealOrg && sess) {
+              sess.activeOrg = activeRealOrg;
+              setSession({ ...sess, activeOrg: activeRealOrg });
+              localStorage.setItem('medintel_real_active_org_id', activeRealOrg.id);
+            }
           } else {
             setUserOrgs([]);
           }
@@ -303,7 +323,34 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                           <button
                             key={o.id}
                             onClick={() => {
-                              supabaseSim.switchActiveOrg(o.id);
+                              const supabase = getSupabaseClient();
+                              if (supabase) {
+                                // Real Supabase switching flow:
+                                // Persist the active org ID in localStorage
+                                localStorage.setItem('medintel_real_active_org_id', o.id);
+                                // Sync local state
+                                if (session) {
+                                  const updatedSession = { ...session, activeOrg: o };
+                                  setSession(updatedSession);
+                                }
+                                
+                                // Keep simulator in sync as well
+                                const simRaw = supabaseSim.getRawState();
+                                const simOrg = simRaw.organizations.find((org: any) => org.slug === o.slug);
+                                if (simOrg) {
+                                  supabaseSim.switchActiveOrg(simOrg.id);
+                                } else {
+                                  try {
+                                    supabaseSim.switchActiveOrg(o.id);
+                                  } catch (err) {
+                                    // Ignore error in case the ID is not found in simulator
+                                  }
+                                }
+                              } else {
+                                // Simulator-only flow
+                                supabaseSim.switchActiveOrg(o.id);
+                              }
+
                               loadUserOrgs();
                               setIsOrgSelectorOpen(false);
                               // Trigger state update
