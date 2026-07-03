@@ -25,6 +25,7 @@ import {
 import { ViewType } from '../types';
 import Logo from './Logo';
 import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
 
 // Views
 import DashboardView from './DashboardView';
@@ -60,15 +61,58 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
   const orgDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // Load user organizations
-  const loadUserOrgs = () => {
+  const loadUserOrgs = async () => {
     const sess = supabaseSim.getSession();
     setSession(sess);
-    if (sess?.user) {
-      const raw = supabaseSim.getRawState();
-      const myMemb = raw.memberships.filter((m: any) => m.user_id === sess.user?.id);
-      const myOrgIds = myMemb.map((m: any) => m.organization_id);
-      const myOrgs = raw.organizations.filter((o: any) => myOrgIds.includes(o.id));
-      setUserOrgs(myOrgs);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const { data: { session: realSession } } = await supabase.auth.getSession();
+        const userId = realSession?.user?.id || sess?.user?.id;
+        if (userId) {
+          // Query memberships for the user
+          const { data: memberships, error: memError } = await supabase
+            .from('memberships')
+            .select('organization_id')
+            .eq('user_id', userId);
+          if (memError) throw memError;
+
+          if (memberships && memberships.length > 0) {
+            const orgIds = memberships.map((m: any) => m.organization_id);
+            // Retrieve related organizations from public.organizations
+            const { data: orgs, error: orgsError } = await supabase
+              .from('organizations')
+              .select('*')
+              .in('id', orgIds);
+            if (orgsError) throw orgsError;
+
+            setUserOrgs(orgs || []);
+          } else {
+            setUserOrgs([]);
+          }
+        } else {
+          setUserOrgs([]);
+        }
+      } catch (err) {
+        console.error('Error fetching real organizations:', err);
+        // Fallback to simulator if database queries fail
+        if (sess?.user) {
+          const raw = supabaseSim.getRawState();
+          const myMemb = raw.memberships.filter((m: any) => m.user_id === sess.user?.id);
+          const myOrgIds = myMemb.map((m: any) => m.organization_id);
+          const myOrgs = raw.organizations.filter((o: any) => myOrgIds.includes(o.id));
+          setUserOrgs(myOrgs);
+        }
+      }
+    } else {
+      if (sess?.user) {
+        const raw = supabaseSim.getRawState();
+        const myMemb = raw.memberships.filter((m: any) => m.user_id === sess.user?.id);
+        const myOrgIds = myMemb.map((m: any) => m.organization_id);
+        const myOrgs = raw.organizations.filter((o: any) => myOrgIds.includes(o.id));
+        setUserOrgs(myOrgs);
+      }
     }
   };
 
