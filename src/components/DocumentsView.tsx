@@ -663,13 +663,55 @@ export default function DocumentsView() {
   };
 
   // Category Manager operations
-  const handleCreateCategory = (e: React.FormEvent) => {
+  const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeOrg || !newCategoryName.trim()) return;
 
+    const trimmedName = newCategoryName.trim();
+    setCategoryError('');
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        // Case-insensitive duplicate check
+        const { data: existing, error: dupError } = await supabase
+          .from('document_categories')
+          .select('id, name')
+          .eq('organization_id', activeOrg.id)
+          .ilike('name', trimmedName);
+
+        if (dupError) {
+          console.warn('Real Supabase duplicate check failed:', dupError);
+        } else if (existing && existing.length > 0) {
+          setCategoryError(`Category '${trimmedName}' already exists.`);
+          return;
+        }
+
+        // Insert category
+        const { error: insertError } = await supabase
+          .from('document_categories')
+          .insert({
+            organization_id: activeOrg.id,
+            name: trimmedName,
+            description: null,
+            color: null,
+            icon: null
+          });
+
+        if (insertError) {
+          console.warn('Real Supabase category insertion failed:', insertError);
+          if (insertError.code === '23505') {
+            setCategoryError(`Category '${trimmedName}' already exists.`);
+            return;
+          }
+        }
+      } catch (err: any) {
+        console.warn('Real Supabase category creation pipeline failed:', err);
+      }
+    }
+
     try {
-      setCategoryError('');
-      const added = supabaseSim.addCategory(newCategoryName.trim(), activeOrg.id);
+      const added = supabaseSim.addCategory(trimmedName, activeOrg.id);
       setCategories(prev => [...prev, added]);
       setNewCategoryName('');
     } catch (err: any) {
