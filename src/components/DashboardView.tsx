@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   FileText,
@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { DocumentItem, ActivityLog } from '../types';
 import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
 
 interface DashboardViewProps {
   onNavigateTo: (view: 'dashboard' | 'documents' | 'assistant' | 'search' | 'analytics' | 'settings' | 'support' | 'supabase') => void;
@@ -25,7 +26,37 @@ interface DashboardViewProps {
 export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
   const session = supabaseSim.getSession();
   const activeOrg = session?.activeOrg;
-  const docs = activeOrg ? supabaseSim.getDocuments(activeOrg.id) : [];
+  const [docs, setDocs] = useState<DocumentItem[]>([]);
+
+  useEffect(() => {
+    const fetchDocs = async () => {
+      if (!activeOrg) {
+        setDocs([]);
+        return;
+      }
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('medical_documents')
+            .select('*')
+            .eq('organization_id', activeOrg.id);
+          if (error) throw error;
+          if (data) {
+            setDocs(data as DocumentItem[]);
+            return;
+          }
+        } catch (err) {
+          console.error('Error fetching medical_documents from Supabase in Dashboard:', err);
+        }
+      }
+      
+      const fallbackDocs = supabaseSim.getDocuments(activeOrg.id);
+      setDocs(fallbackDocs);
+    };
+
+    fetchDocs();
+  }, [activeOrg]);
 
   const stats = [
     {

@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { DocumentItem, CustomCategory } from '../types';
 import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
 
 interface UploadProgressItem {
   id: string;
@@ -89,12 +90,30 @@ export default function DocumentsView() {
   const [dicomSlice, setDicomSlice] = useState(12);
 
   // Load documents and categories safely scoped to current user organization
-  const refreshData = () => {
+  const refreshData = async () => {
     if (activeOrg) {
-      const orgDocs = supabaseSim.getDocuments(activeOrg.id);
       const orgCats = supabaseSim.getCategories(activeOrg.id);
-      setDocuments(orgDocs);
       setCategories(orgCats);
+
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('medical_documents')
+            .select('*')
+            .eq('organization_id', activeOrg.id);
+          if (error) throw error;
+          if (data) {
+            setDocuments(data as DocumentItem[]);
+            return;
+          }
+        } catch (err) {
+          console.error('Error fetching medical_documents from Supabase:', err);
+        }
+      }
+
+      const orgDocs = supabaseSim.getDocuments(activeOrg.id);
+      setDocuments(orgDocs);
     }
   };
 
@@ -369,8 +388,7 @@ export default function DocumentsView() {
       const updatedCats = supabaseSim.getCategories(activeOrg.id);
       setCategories(updatedCats);
       // reload docs since some may have fallback category assigned
-      const updatedDocs = supabaseSim.getDocuments(activeOrg.id);
-      setDocuments(updatedDocs);
+      refreshData();
     }
   };
 
