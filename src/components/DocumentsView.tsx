@@ -171,27 +171,68 @@ export default function DocumentsView() {
             }
           }
 
+          // Query the public.processing_jobs table if a real Supabase client is configured
+          let jobsData: any[] = [];
+          try {
+            const { data: fetchedJobs, error: jobsError } = await supabase
+              .from('processing_jobs')
+              .select('*')
+              .eq('organization_id', activeOrg.id);
+            if (!jobsError && fetchedJobs) {
+              jobsData = fetchedJobs;
+            } else if (jobsError) {
+              console.warn('Real Supabase processing jobs query failed:', jobsError);
+            }
+          } catch (err) {
+            console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+          }
+
+          // Map from document_id to the newest processing job
+          const newestJobsMap: { [docId: string]: any } = {};
+          jobsData.forEach(job => {
+            const existingJob = newestJobsMap[job.document_id];
+            if (!existingJob || new Date(job.created_at) > new Date(existingJob.created_at)) {
+              newestJobsMap[job.document_id] = job;
+            }
+          });
+
           if (data) {
-            const mappedDocs: DocumentItem[] = data.map((doc: any) => ({
-              id: doc.id,
-              title: doc.title || 'Untitled Document',
-              description: doc.description || '',
-              category: doc.document_categories?.name || doc.category || 'Clinical Guidelines',
-              tags: Array.isArray(doc.tags) ? doc.tags : [],
-              organization_id: doc.organization_id,
-              uploaded_by: doc.profiles?.full_name || doc.uploaded_by || 'Dr. Sarah Lin',
-              uploaded_by_id: doc.uploaded_by || '',
-              date: doc.created_at || doc.date || new Date().toISOString(),
-              last_modified: doc.updated_at || doc.last_modified || new Date().toISOString(),
-              size: doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : (doc.size || '1.2 MB'),
-              file_type: doc.mime_type || doc.file_type || 'PDF',
-              version: doc.version ? doc.version.toString() : '1',
-              status: doc.status === 'indexed' || doc.status === 'Ready' ? 'Ready' : 
-                      doc.status === 'processing' || doc.status === 'Indexing' ? 'Indexing' : 
-                      doc.status === 'failed' || doc.status === 'Failed' ? 'Failed' : 'Ready',
-              compliance: doc.compliance || 'HIPAA compliant',
-              patientId: doc.patientId,
-            }));
+            const mappedDocs: DocumentItem[] = data.map((doc: any) => {
+              const job = newestJobsMap[doc.id];
+              let statusVal: 'Ready' | 'Indexing' | 'Failed' | 'Draft' | 'Uploading' | 'Processing' = 'Ready';
+              if (job) {
+                if (job.status === 'queued') statusVal = 'Uploading';
+                else if (job.status === 'running') statusVal = 'Processing';
+                else if (job.status === 'completed') statusVal = 'Ready';
+                else if (job.status === 'failed') statusVal = 'Failed';
+              } else {
+                statusVal = doc.status === 'indexed' || doc.status === 'Ready' ? 'Ready' : 
+                            doc.status === 'processing' || doc.status === 'Indexing' ? 'Indexing' : 
+                            doc.status === 'failed' || doc.status === 'Failed' ? 'Failed' : 'Ready';
+              }
+
+              return {
+                id: doc.id,
+                title: doc.title || 'Untitled Document',
+                description: doc.description || '',
+                category: doc.document_categories?.name || doc.category || 'Clinical Guidelines',
+                tags: Array.isArray(doc.tags) ? doc.tags : [],
+                organization_id: doc.organization_id,
+                uploaded_by: doc.profiles?.full_name || doc.uploaded_by || 'Dr. Sarah Lin',
+                uploaded_by_id: doc.uploaded_by || '',
+                date: doc.created_at || doc.date || new Date().toISOString(),
+                last_modified: doc.updated_at || doc.last_modified || new Date().toISOString(),
+                size: doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : (doc.size || '1.2 MB'),
+                file_type: doc.mime_type || doc.file_type || 'PDF',
+                version: doc.version ? doc.version.toString() : '1',
+                status: statusVal,
+                compliance: doc.compliance || 'HIPAA compliant',
+                patientId: doc.patientId,
+                progress: job ? job.progress_percentage : undefined,
+                statusMessage: job ? job.current_step : undefined,
+                error: job ? (job.error_message || undefined) : undefined,
+              };
+            });
             loadedDocuments = mappedDocs;
           }
         } catch (err) {
@@ -826,7 +867,9 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
 
     const matchesCategory = activeCategoryFilter === 'All' || doc.category === activeCategoryFilter;
     const matchesFileType = activeFileTypeFilter === 'All' || doc.file_type === activeFileTypeFilter;
-    const matchesStatus = activeStatusFilter === 'All' || doc.status === activeStatusFilter;
+    const matchesStatus = activeStatusFilter === 'All' || 
+      doc.status === activeStatusFilter ||
+      (activeStatusFilter === 'Indexing' && (doc.status === 'Uploading' || doc.status === 'Processing'));
 
     return matchesSearch && matchesCategory && matchesFileType && matchesStatus;
   });

@@ -55,7 +55,7 @@ export interface DocumentItem {
   size: string;
   file_type: string;
   version: string;
-  status: 'Ready' | 'Indexing' | 'Failed' | 'Draft';
+  status: 'Ready' | 'Indexing' | 'Failed' | 'Draft' | 'Uploading' | 'Processing';
   compliance: 'HIPAA compliant' | 'GDPR compliant';
   patientId?: string;
 }
