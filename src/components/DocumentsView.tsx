@@ -506,9 +506,52 @@ export default function DocumentsView() {
   };
 
   // Delete Document
-  const handleDeleteDoc = (id: string) => {
+  const handleDeleteDoc = async (id: string) => {
     if (!activeOrg) return;
     if (confirm('Are you sure you want to permanently delete this document from organizational knowledge repository? This action is audited and irreversible.')) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+          if (isUUID(id)) {
+            // 1. Fetch storage path
+            const { data: docData, error: fetchError } = await supabase
+              .from('documents')
+              .select('storage_path')
+              .eq('id', id)
+              .maybeSingle();
+
+            if (fetchError) {
+              console.warn('Failed to fetch storage_path for deletion:', fetchError);
+            }
+
+            // 2. Remove from storage if exists
+            if (docData?.storage_path) {
+              const { error: storageError } = await supabase.storage
+                .from('medical-documents')
+                .remove([docData.storage_path]);
+              if (storageError) {
+                console.warn('Failed to remove storage object:', storageError);
+              }
+            }
+
+            // 3. Delete database row
+            const { error: deleteError } = await supabase
+              .from('documents')
+              .delete()
+              .eq('id', id);
+
+            if (deleteError) {
+              console.warn('Failed to delete document from database:', deleteError);
+            }
+          } else {
+            console.warn('Document ID is not a valid UUID, skipping real database deletion.');
+          }
+        } catch (err) {
+          console.warn('Real Supabase document deletion pipeline failed (falling back to simulator):', err);
+        }
+      }
+
       supabaseSim.deleteDocument(id, activeOrg.id);
       setDocuments(prev => prev.filter(doc => doc.id !== id));
       if (previewDoc?.id === id) {
