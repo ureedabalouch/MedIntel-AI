@@ -92,11 +92,52 @@ export default function DocumentsView() {
   // Load documents and categories safely scoped to current user organization
   const refreshData = async () => {
     if (activeOrg) {
-      const orgCats = supabaseSim.getCategories(activeOrg.id);
-      setCategories(orgCats);
+      let loadedCategories: CustomCategory[] | null = null;
+      let loadedDocuments: DocumentItem[] | null = null;
 
       const supabase = getSupabaseClient();
       if (supabase) {
+        // Load categories from Supabase
+        try {
+          const { data: catData, error: catError } = await supabase
+            .from('document_categories')
+            .select('id, name, description, color, icon, created_at, updated_at, organization_id')
+            .eq('organization_id', activeOrg.id);
+
+          if (catError) {
+            throw catError;
+          }
+
+          if (catData) {
+            const dbCats: CustomCategory[] = catData.map((cat: any) => ({
+              id: cat.id,
+              name: cat.name,
+              organization_id: cat.organization_id
+            }));
+
+            const defaultCatsToPreserve = [
+              { id: 'cat-cg', name: 'Clinical Guidelines', organization_id: null },
+              { id: 'cat-rp', name: 'Research Papers', organization_id: null },
+              { id: 'cat-hs', name: 'Hospital SOPs', organization_id: null },
+              { id: 'cat-pe', name: 'Patient Education', organization_id: null },
+              { id: 'cat-mb', name: 'Medical Books', organization_id: null },
+              { id: 'cat-dr', name: 'Drug References', organization_id: null },
+              { id: 'cat-ar', name: 'Archived', organization_id: null }
+            ];
+
+            for (const defCat of defaultCatsToPreserve) {
+              const exists = dbCats.some(c => c.name.toLowerCase() === defCat.name.toLowerCase());
+              if (!exists) {
+                dbCats.push(defCat);
+              }
+            }
+            loadedCategories = dbCats;
+          }
+        } catch (err) {
+          console.warn('Real Supabase category query failed, falling back to simulator:', err);
+        }
+
+        // Load documents from Supabase
         try {
           // First attempt: Query 'documents' with joins for category and profile details
           let { data, error } = await supabase
@@ -151,16 +192,27 @@ export default function DocumentsView() {
               compliance: doc.compliance || 'HIPAA compliant',
               patientId: doc.patientId,
             }));
-            setDocuments(mappedDocs);
-            return;
+            loadedDocuments = mappedDocs;
           }
         } catch (err) {
           console.warn('Real Supabase document query failed (expected if unauthenticated), using simulator fallback:', err);
         }
       }
 
-      const orgDocs = supabaseSim.getDocuments(activeOrg.id);
-      setDocuments(orgDocs);
+      // Update state
+      if (loadedCategories) {
+        setCategories(loadedCategories);
+      } else {
+        const orgCats = supabaseSim.getCategories(activeOrg.id);
+        setCategories(orgCats);
+      }
+
+      if (loadedDocuments) {
+        setDocuments(loadedDocuments);
+      } else {
+        const orgDocs = supabaseSim.getDocuments(activeOrg.id);
+        setDocuments(orgDocs);
+      }
     }
   };
 
