@@ -719,9 +719,57 @@ export default function DocumentsView() {
     }
   };
 
-  const handleDeleteCategory = (catId: string) => {
+  const handleDeleteCategory = async (catId: string) => {
     if (!activeOrg) return;
     if (confirm('Delete this custom category? Documents under this category will automatically fallback to "Clinical Guidelines".')) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+          if (isUUID(catId)) {
+            // 1. Verify category exists in DB
+            const { data: category, error: findError } = await supabase
+              .from('document_categories')
+              .select('id, name')
+              .eq('organization_id', activeOrg.id)
+              .eq('id', catId)
+              .maybeSingle();
+
+            if (findError) {
+              console.warn('Error querying category for deletion:', findError);
+            }
+
+            if (category) {
+              // 2. Update documents referencing this category to set category_id = NULL
+              const { error: updateError } = await supabase
+                .from('documents')
+                .update({ category_id: null })
+                .eq('category_id', catId);
+
+              if (updateError) {
+                console.warn('Error disassociating documents from category:', updateError);
+              }
+
+              // 3. Delete category from public.document_categories
+              const { error: deleteError } = await supabase
+                .from('document_categories')
+                .delete()
+                .eq('id', catId);
+
+              if (deleteError) {
+                console.warn('Error deleting category row:', deleteError);
+              }
+            } else {
+              console.warn('Category not found in database, skipping real database deletion.');
+            }
+          } else {
+            console.warn('Category ID is not a valid UUID, skipping real database deletion.');
+          }
+        } catch (err) {
+          console.warn('Real Supabase category deletion pipeline failed:', err);
+        }
+      }
+
       supabaseSim.deleteCategory(catId, activeOrg.id);
       // Refresh categories list and docs list
       const updatedCats = supabaseSim.getCategories(activeOrg.id);
