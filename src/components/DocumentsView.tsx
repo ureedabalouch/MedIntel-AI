@@ -233,7 +233,7 @@ export default function DocumentsView() {
       setUploadQueue(prev => [newItem, ...prev]);
 
       // Simulate step-by-step progress upload and cyber ingestion
-      simulateUploadProgress(uploadId, file.name, formattedSize, extension);
+      simulateUploadProgress(uploadId, file, formattedSize, extension);
     });
   };
 
@@ -246,7 +246,7 @@ export default function DocumentsView() {
     }
   };
 
-  const simulateUploadProgress = (id: string, name: string, size: string, fileType: string) => {
+  const simulateUploadProgress = (id: string, file: File, size: string, fileType: string) => {
     let progress = 0;
     
     const interval = setInterval(() => {
@@ -265,13 +265,68 @@ export default function DocumentsView() {
         }));
 
         // Advance to Ingesting
-        setTimeout(() => {
+        setTimeout(async () => {
           setUploadQueue(prev => prev.map(item => {
             if (item.id === id) {
               return { ...item, status: 'Ingesting' };
             }
             return item;
           }));
+
+          let realInsertedDocId: string | undefined;
+          const supabase = getSupabaseClient();
+          if (supabase && activeOrg) {
+            try {
+              // 1. Upload to Supabase Storage
+              const storagePath = `${activeOrg.id}/${file.name}`;
+              const { error: uploadError } = await supabase.storage
+                .from('medical-documents')
+                .upload(storagePath, file, { upsert: true });
+                
+              if (uploadError) throw uploadError;
+
+              // 2. Resolve category_id
+              const category = getAutoCategoryByExtension(fileType);
+              const { data: catData } = await supabase
+                .from('document_categories')
+                .select('id')
+                .eq('organization_id', activeOrg.id)
+                .eq('name', category)
+                .maybeSingle();
+              const categoryId = catData?.id || null;
+
+              // 3. Resolve uploaded_by UUID
+              const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+              const uploadedByUuid = profile?.id && isUUID(profile.id) ? profile.id : null;
+
+              // 4. Insert into documents table
+              const { data: insertedDoc, error: insertError } = await supabase
+                .from('documents')
+                .insert({
+                  organization_id: activeOrg.id,
+                  category_id: categoryId,
+                  uploaded_by: uploadedByUuid,
+                  title: file.name,
+                  description: `Ingested ${fileType} document, automatically validated and mapped to private organizational RLS storage.`,
+                  storage_path: storagePath,
+                  original_filename: file.name,
+                  mime_type: fileType,
+                  file_size: file.size,
+                  status: 'indexed',
+                  version: 1,
+                  tags: [fileType, 'Ingested', 'Auto-Mapped']
+                })
+                .select('*')
+                .single();
+
+              if (insertError) throw insertError;
+              if (insertedDoc) {
+                realInsertedDocId = insertedDoc.id;
+              }
+            } catch (err) {
+              console.warn('Real Supabase upload/insert failed (falling back to simulator):', err);
+            }
+          }
 
           // Finalize and insert in Simulated DB
           setTimeout(() => {
@@ -281,7 +336,7 @@ export default function DocumentsView() {
             
             // Add to simulated db
             const addedDoc = supabaseSim.addDocument({
-              title: name,
+              title: file.name,
               description: `Ingested ${fileType} document, automatically validated and mapped to private organizational RLS storage.`,
               category: category,
               tags: [fileType, 'Ingested', 'Auto-Mapped'],
@@ -295,6 +350,10 @@ export default function DocumentsView() {
               compliance: 'HIPAA compliant',
               patientId: fileType === 'DICOM' ? 'PAT-' + Math.floor(1000 + Math.random() * 9000) : undefined
             });
+
+            if (realInsertedDocId) {
+              addedDoc.id = realInsertedDocId;
+            }
 
             // Update state
             setDocuments(prev => [addedDoc, ...prev]);
@@ -327,7 +386,7 @@ export default function DocumentsView() {
   };
 
   // Form Upload Submit (custom parameters)
-  const handleCustomUploadSubmit = (e: React.FormEvent) => {
+  const handleCustomUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeOrg) return;
 
@@ -336,6 +395,7 @@ export default function DocumentsView() {
       return;
     }
 
+    const filename = newFileTitle.endsWith('.' + newFileType.toLowerCase()) ? newFileTitle : `${newFileTitle}.${newFileType.toLowerCase()}`;
     const tagsArray = newFileTags
       ? newFileTags.split(',').map(t => t.trim()).filter(Boolean)
       : [newFileType, 'Manual'];
@@ -349,8 +409,74 @@ export default function DocumentsView() {
       'DOCX': '850.0 KB'
     };
 
+    let fileSizeInBytes = 1024 * 1024; // 1 MB fallback
+    const fakeSizeStr = fakeSizes[newFileType] || '1.2 MB';
+    if (fakeSizeStr.includes('MB')) {
+      fileSizeInBytes = Math.round(parseFloat(fakeSizeStr) * 1024 * 1024);
+    } else if (fakeSizeStr.includes('KB')) {
+      fileSizeInBytes = Math.round(parseFloat(fakeSizeStr) * 1024);
+    }
+
+    let realInsertedDocId: string | undefined;
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const dummyContent = `MedIntel AI manual metadata asset: ${newFileTitle}\nDescription: ${newFileDesc}`;
+        const blob = new Blob([dummyContent], { type: 'text/plain' });
+        const file = new File([blob], filename, { type: 'text/plain' });
+
+        // 1. Upload to Supabase Storage
+        const storagePath = `${activeOrg.id}/${filename}`;
+        const { error: uploadError } = await supabase.storage
+          .from('medical-documents')
+          .upload(storagePath, file, { upsert: true });
+
+        if (uploadError) throw uploadError;
+
+        // 2. Resolve category_id
+        const { data: catData } = await supabase
+          .from('document_categories')
+          .select('id')
+          .eq('organization_id', activeOrg.id)
+          .eq('name', newFileCategory)
+          .maybeSingle();
+        const categoryId = catData?.id || null;
+
+        // 3. Resolve uploaded_by UUID
+        const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        const uploadedByUuid = profile?.id && isUUID(profile.id) ? profile.id : null;
+
+        // 4. Insert into documents table
+        const { data: insertedDoc, error: insertError } = await supabase
+          .from('documents')
+          .insert({
+            organization_id: activeOrg.id,
+            category_id: categoryId,
+            uploaded_by: uploadedByUuid,
+            title: filename,
+            description: newFileDesc.trim() || 'A manual ingestion of workspace clinical assets with customized tag mappings.',
+            storage_path: storagePath,
+            original_filename: filename,
+            mime_type: newFileType,
+            file_size: fileSizeInBytes,
+            status: 'indexed',
+            version: 1,
+            tags: tagsArray
+          })
+          .select('*')
+          .single();
+
+        if (insertError) throw insertError;
+        if (insertedDoc) {
+          realInsertedDocId = insertedDoc.id;
+        }
+      } catch (err) {
+        console.warn('Real Supabase manual upload/insert failed (falling back to simulator):', err);
+      }
+    }
+
     const added = supabaseSim.addDocument({
-      title: newFileTitle.endsWith('.' + newFileType.toLowerCase()) ? newFileTitle : `${newFileTitle}.${newFileType.toLowerCase()}`,
+      title: filename,
       description: newFileDesc.trim() || 'A manual ingestion of workspace clinical assets with customized tag mappings.',
       category: newFileCategory,
       tags: tagsArray,
@@ -364,6 +490,10 @@ export default function DocumentsView() {
       compliance: 'HIPAA compliant',
       patientId: newFilePatientId.trim() || undefined
     });
+
+    if (realInsertedDocId) {
+      added.id = realInsertedDocId;
+    }
 
     // Refresh & Clear
     setDocuments(prev => [added, ...prev]);
