@@ -524,10 +524,35 @@ export default function DocumentsView() {
     setRenameDescValue(doc.description);
   };
 
-  const handleRenameSubmit = (e: React.FormEvent) => {
+  const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeOrg || !renameDoc) return;
     if (!renameValue.trim()) return;
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+        if (isUUID(renameDoc.id)) {
+          const { error } = await supabase
+            .from('documents')
+            .update({
+              title: renameValue.trim(),
+              description: renameDescValue.trim(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', renameDoc.id);
+          
+          if (error) {
+            console.warn('Real Supabase document update failed (falling back to simulator):', error);
+          }
+        } else {
+          console.warn('Document ID is not a valid UUID, skipping real database update.');
+        }
+      } catch (err) {
+        console.warn('Real Supabase document rename/metadata update failed (falling back to simulator):', err);
+      }
+    }
 
     const updated = supabaseSim.renameDocument(renameDoc.id, activeOrg.id, renameValue);
     supabaseSim.updateDocumentMetadata(renameDoc.id, activeOrg.id, { description: renameDescValue });
