@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'motion/react';
 import {
   FileText,
@@ -28,159 +28,207 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
   const activeOrg = session?.activeOrg;
   const [docs, setDocs] = useState<DocumentItem[]>([]);
 
-  useEffect(() => {
-    const fetchDocs = async () => {
-      if (!activeOrg) {
-        setDocs([]);
-        return;
-      }
-      const supabase = getSupabaseClient();
-      if (supabase) {
-        try {
-          // First attempt: Query 'documents' with joins for category and profile details
-          let { data, error } = await supabase
+  const fetchDocs = useCallback(async () => {
+    if (!activeOrg) {
+      setDocs([]);
+      return;
+    }
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        // First attempt: Query 'documents' with joins for category and profile details
+        let { data, error } = await supabase
+          .from('documents')
+          .select('*, document_categories(name), profiles(full_name)')
+          .eq('organization_id', activeOrg.id);
+        
+        if (error) {
+          // Second attempt: Try querying 'documents' without joins in case of schema limitations
+          const fallbackQuery = await supabase
             .from('documents')
-            .select('*, document_categories(name), profiles(full_name)')
+            .select('*')
             .eq('organization_id', activeOrg.id);
           
-          if (error) {
-            // Second attempt: Try querying 'documents' without joins in case of schema limitations
-            const fallbackQuery = await supabase
-              .from('documents')
+          if (!fallbackQuery.error && fallbackQuery.data) {
+            data = fallbackQuery.data;
+            error = null;
+          } else {
+            // Third attempt: Try querying 'medical_documents' as specified in some logs/contexts
+            const medDocsQuery = await supabase
+              .from('medical_documents')
               .select('*')
               .eq('organization_id', activeOrg.id);
             
-            if (!fallbackQuery.error && fallbackQuery.data) {
-              data = fallbackQuery.data;
+            if (!medDocsQuery.error && medDocsQuery.data) {
+              data = medDocsQuery.data;
               error = null;
             } else {
-              // Third attempt: Try querying 'medical_documents' as specified in some logs/contexts
-              const medDocsQuery = await supabase
-                .from('medical_documents')
-                .select('*')
-                .eq('organization_id', activeOrg.id);
-              
-              if (!medDocsQuery.error && medDocsQuery.data) {
-                data = medDocsQuery.data;
-                error = null;
-              } else {
-                throw error || fallbackQuery.error || medDocsQuery.error;
-              }
+              throw error || fallbackQuery.error || medDocsQuery.error;
             }
           }
+        }
 
-          // Query the public.processing_jobs table if a real Supabase client is configured
-          let jobsData: any[] = [];
-          try {
-            const { data: fetchedJobs, error: jobsError } = await supabase
-              .from('processing_jobs')
-              .select('*')
-              .eq('organization_id', activeOrg.id);
-            if (!jobsError && fetchedJobs) {
-              jobsData = fetchedJobs;
-            } else if (jobsError) {
-              console.warn('Real Supabase processing jobs query failed:', jobsError);
-            }
-          } catch (err) {
-            console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
-          }
-
-          // Map from document_id to the newest processing job
-          const newestJobsMap: { [docId: string]: any } = {};
-          jobsData.forEach(job => {
-            const existingJob = newestJobsMap[job.document_id];
-            if (!existingJob || new Date(job.created_at) > new Date(existingJob.created_at)) {
-              newestJobsMap[job.document_id] = job;
-            }
-          });
-
-          if (data) {
-            const mappedDocs: DocumentItem[] = data.map((doc: any) => {
-              const job = newestJobsMap[doc.id];
-              let statusVal: 'Ready' | 'Indexing' | 'Failed' | 'Draft' | 'Uploading' | 'Processing' = 'Ready';
-              if (job) {
-                if (job.status === 'queued') statusVal = 'Uploading';
-                else if (job.status === 'running') statusVal = 'Processing';
-                else if (job.status === 'completed') {
-                  statusVal = 'Ready';
-                  if (doc.status !== 'indexed' && doc.status !== 'Ready') {
-                    const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-                    if (isUUID(doc.id)) {
-                      try {
-                        (async () => {
-                          const { error } = await supabase
-                            .from('documents')
-                            .update({ status: 'indexed' })
-                            .eq('id', doc.id);
-                          if (error) console.warn('Failed to sync document status to indexed:', error);
-                        })().catch(err => console.warn('Failed to sync document status to indexed:', err));
-                      } catch (err) {
-                        console.warn('Failed to sync document status:', err);
-                      }
-                    }
-                  }
-                }
-                else if (job.status === 'failed') {
-                  statusVal = 'Failed';
-                  if (doc.status !== 'failed' && doc.status !== 'Failed') {
-                    const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
-                    if (isUUID(doc.id)) {
-                      try {
-                        (async () => {
-                          const { error } = await supabase
-                            .from('documents')
-                            .update({ status: 'failed' })
-                            .eq('id', doc.id);
-                          if (error) console.warn('Failed to sync document status to failed:', error);
-                        })().catch(err => console.warn('Failed to sync document status to failed:', err));
-                      } catch (err) {
-                        console.warn('Failed to sync document status:', err);
-                      }
-                    }
-                  }
-                }
-              } else {
-                statusVal = doc.status === 'indexed' || doc.status === 'Ready' ? 'Ready' : 
-                            doc.status === 'processing' || doc.status === 'Indexing' ? 'Indexing' : 
-                            doc.status === 'failed' || doc.status === 'Failed' ? 'Failed' : 'Ready';
-              }
-
-              return {
-                id: doc.id,
-                title: doc.title || 'Untitled Document',
-                description: doc.description || '',
-                category: doc.document_categories?.name || doc.category || 'Clinical Guidelines',
-                tags: Array.isArray(doc.tags) ? doc.tags : [],
-                organization_id: doc.organization_id,
-                uploaded_by: doc.profiles?.full_name || doc.uploaded_by || 'Dr. Sarah Lin',
-                uploaded_by_id: doc.uploaded_by || '',
-                date: doc.created_at || doc.date || new Date().toISOString(),
-                last_modified: doc.updated_at || doc.last_modified || new Date().toISOString(),
-                size: doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : (doc.size || '1.2 MB'),
-                file_type: doc.mime_type || doc.file_type || 'PDF',
-                version: doc.version ? doc.version.toString() : '1',
-                status: statusVal,
-                compliance: doc.compliance || 'HIPAA compliant',
-                patientId: doc.patientId,
-                progress: job ? job.progress_percentage : undefined,
-                statusMessage: job ? job.current_step : undefined,
-                error: job ? (job.error_message || undefined) : undefined,
-              };
-            });
-            setDocs(mappedDocs);
-            return;
+        // Query the public.processing_jobs table if a real Supabase client is configured
+        let jobsData: any[] = [];
+        try {
+          const { data: fetchedJobs, error: jobsError } = await supabase
+            .from('processing_jobs')
+            .select('*')
+            .eq('organization_id', activeOrg.id);
+          if (!jobsError && fetchedJobs) {
+            jobsData = fetchedJobs;
+          } else if (jobsError) {
+            console.warn('Real Supabase processing jobs query failed:', jobsError);
           }
         } catch (err) {
-          console.warn('Real Supabase document query failed (expected if unauthenticated), using simulator fallback:', err);
+          console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+        }
+
+        // Map from document_id to the newest processing job
+        const newestJobsMap: { [docId: string]: any } = {};
+        jobsData.forEach(job => {
+          const existingJob = newestJobsMap[job.document_id];
+          if (!existingJob || new Date(job.created_at) > new Date(existingJob.created_at)) {
+            newestJobsMap[job.document_id] = job;
+          }
+        });
+
+        if (data) {
+          const mappedDocs: DocumentItem[] = data.map((doc: any) => {
+            const job = newestJobsMap[doc.id];
+            let statusVal: 'Ready' | 'Indexing' | 'Failed' | 'Draft' | 'Uploading' | 'Processing' = 'Ready';
+            if (job) {
+              if (job.status === 'queued') statusVal = 'Uploading';
+              else if (job.status === 'running') statusVal = 'Processing';
+              else if (job.status === 'completed') {
+                statusVal = 'Ready';
+                if (doc.status !== 'indexed' && doc.status !== 'Ready') {
+                  const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                  if (isUUID(doc.id)) {
+                    try {
+                      (async () => {
+                        const { error } = await supabase
+                          .from('documents')
+                          .update({ status: 'indexed' })
+                          .eq('id', doc.id);
+                        if (error) console.warn('Failed to sync document status to indexed:', error);
+                      })().catch(err => console.warn('Failed to sync document status to indexed:', err));
+                    } catch (err) {
+                      console.warn('Failed to sync document status:', err);
+                    }
+                  }
+                }
+              }
+              else if (job.status === 'failed') {
+                statusVal = 'Failed';
+                if (doc.status !== 'failed' && doc.status !== 'Failed') {
+                  const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                  if (isUUID(doc.id)) {
+                    try {
+                      (async () => {
+                        const { error } = await supabase
+                          .from('documents')
+                          .update({ status: 'failed' })
+                          .eq('id', doc.id);
+                        if (error) console.warn('Failed to sync document status to failed:', error);
+                      })().catch(err => console.warn('Failed to sync document status to failed:', err));
+                    } catch (err) {
+                      console.warn('Failed to sync document status:', err);
+                    }
+                  }
+                }
+              }
+            } else {
+              statusVal = doc.status === 'indexed' || doc.status === 'Ready' ? 'Ready' : 
+                          doc.status === 'processing' || doc.status === 'Indexing' ? 'Indexing' : 
+                          doc.status === 'failed' || doc.status === 'Failed' ? 'Failed' : 'Ready';
+            }
+
+            return {
+              id: doc.id,
+              title: doc.title || 'Untitled Document',
+              description: doc.description || '',
+              category: doc.document_categories?.name || doc.category || 'Clinical Guidelines',
+              tags: Array.isArray(doc.tags) ? doc.tags : [],
+              organization_id: doc.organization_id,
+              uploaded_by: doc.profiles?.full_name || doc.uploaded_by || 'Dr. Sarah Lin',
+              uploaded_by_id: doc.uploaded_by || '',
+              date: doc.created_at || doc.date || new Date().toISOString(),
+              last_modified: doc.updated_at || doc.last_modified || new Date().toISOString(),
+              size: doc.file_size ? `${(doc.file_size / 1024).toFixed(1)} KB` : (doc.size || '1.2 MB'),
+              file_type: doc.mime_type || doc.file_type || 'PDF',
+              version: doc.version ? doc.version.toString() : '1',
+              status: statusVal,
+              compliance: doc.compliance || 'HIPAA compliant',
+              patientId: doc.patientId,
+              progress: job ? job.progress_percentage : undefined,
+              statusMessage: job ? job.current_step : undefined,
+              error: job ? (job.error_message || undefined) : undefined,
+            };
+          });
+          setDocs(mappedDocs);
+          return;
+        }
+      } catch (err) {
+        console.warn('Real Supabase document query failed (expected if unauthenticated), using simulator fallback:', err);
+      }
+    }
+    
+    const fallbackDocs = supabaseSim.getDocuments(activeOrg.id);
+    setDocs(fallbackDocs);
+  }, [activeOrg]);
+
+  useEffect(() => {
+    fetchDocs();
+  }, [fetchDocs]);
+
+  // Realtime subscription for processing_jobs in Dashboard
+  useEffect(() => {
+    if (!activeOrg) return;
+
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    let channel: any = null;
+
+    try {
+      channel = supabase
+        .channel(`processing_jobs_dash_${activeOrg.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'processing_jobs',
+            filter: `organization_id=eq.${activeOrg.id}`
+          },
+          () => {
+            fetchDocs();
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`Successfully subscribed to processing_jobs Realtime events for organization in dashboard: ${activeOrg.id}`);
+          } else if (status === 'CHANNEL_ERROR') {
+            console.warn('Realtime subscription channel error for processing_jobs in dashboard');
+          }
+        });
+    } catch (err) {
+      console.warn('Failed to set up Realtime subscription for processing_jobs in dashboard:', err);
+    }
+
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel).catch((err: any) => {
+            console.warn('Failed to remove channel in dashboard:', err);
+          });
+        } catch (err) {
+          console.warn('Failed to unsubscribe/remove channel in dashboard:', err);
         }
       }
-      
-      const fallbackDocs = supabaseSim.getDocuments(activeOrg.id);
-      setDocs(fallbackDocs);
     };
-
-    fetchDocs();
-  }, [activeOrg]);
+  }, [activeOrg, fetchDocs]);
 
   const stats = [
     {

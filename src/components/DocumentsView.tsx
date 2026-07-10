@@ -344,20 +344,53 @@ export default function DocumentsView() {
     refreshData();
   }, [activeOrg]);
 
-  // Polling database for active jobs
+  // Realtime subscription for processing_jobs in DocumentsView
   useEffect(() => {
-    const hasActiveJobs = uploadQueue.some(item => 
-      !item.id.startsWith('upload-') && item.status !== 'Completed' && item.status !== 'Failed'
-    );
-    
-    if (!hasActiveJobs) return;
+    if (!activeOrg) return;
 
-    const intervalId = setInterval(() => {
-      refreshData();
-    }, 2000);
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
 
-    return () => clearInterval(intervalId);
-  }, [uploadQueue, activeOrg]);
+    let channel: any = null;
+
+    try {
+      channel = supabase
+        .channel(`processing_jobs_docs_${activeOrg.id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'processing_jobs',
+            filter: `organization_id=eq.${activeOrg.id}`
+          },
+          () => {
+            refreshData();
+          }
+        )
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            console.log(`Successfully subscribed to processing_jobs Realtime events for organization in documents view: ${activeOrg.id}`);
+          } else if (status === 'CHANNEL_ERROR') {
+            console.warn('Realtime subscription channel error for processing_jobs in documents view');
+          }
+        });
+    } catch (err) {
+      console.warn('Failed to set up Realtime subscription for processing_jobs in documents view:', err);
+    }
+
+    return () => {
+      if (channel) {
+        try {
+          supabase.removeChannel(channel).catch((err: any) => {
+            console.warn('Failed to remove channel in documents view:', err);
+          });
+        } catch (err) {
+          console.warn('Failed to unsubscribe/remove channel in documents view:', err);
+        }
+      }
+    };
+  }, [activeOrg]);
 
   // Drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
