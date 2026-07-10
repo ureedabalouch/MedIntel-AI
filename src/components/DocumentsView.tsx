@@ -43,10 +43,11 @@ interface UploadProgressItem {
   name: string;
   size: string;
   progress: number;
-  status: 'Uploading' | 'Scanning' | 'Ingesting' | 'Completed' | 'Failed';
+  status: 'Uploading' | 'Scanning' | 'Ingesting' | 'Completed' | 'Failed' | 'Processing';
   error?: string;
   category: string;
   fileType: string;
+  statusMessage?: string;
 }
 
 export default function DocumentsView() {
@@ -196,6 +197,52 @@ export default function DocumentsView() {
             }
           });
 
+          // Synchronize the uploadQueue item using latest processing_jobs
+          if (jobsData.length > 0) {
+            try {
+              setUploadQueue(prev => {
+                let updated = false;
+                const nextQueue = prev.map(item => {
+                  const job = newestJobsMap[item.id];
+                  if (job) {
+                    let mappedStatus: 'Uploading' | 'Processing' | 'Completed' | 'Failed' = 'Uploading';
+                    if (job.status === 'queued') mappedStatus = 'Uploading';
+                    else if (job.status === 'running') mappedStatus = 'Processing';
+                    else if (job.status === 'completed') mappedStatus = 'Completed';
+                    else if (job.status === 'failed') mappedStatus = 'Failed';
+
+                    const newProgress = job.progress_percentage !== null && job.progress_percentage !== undefined ? job.progress_percentage : item.progress;
+                    const newStatusMessage = job.current_step || undefined;
+                    const newError = job.error_message || undefined;
+
+                    if (item.status !== mappedStatus || item.progress !== newProgress || item.statusMessage !== newStatusMessage || item.error !== newError) {
+                      updated = true;
+
+                      // If transitioning to Completed or Failed for the first time, set auto-clear timer
+                      if ((mappedStatus === 'Completed' || mappedStatus === 'Failed') && item.status !== 'Completed' && item.status !== 'Failed') {
+                        setTimeout(() => {
+                          setUploadQueue(current => current.filter(q => q.id !== item.id));
+                        }, 5000);
+                      }
+
+                      return {
+                        ...item,
+                        progress: newProgress,
+                        status: mappedStatus,
+                        statusMessage: newStatusMessage,
+                        error: newError
+                      };
+                    }
+                  }
+                  return item;
+                });
+                return updated ? nextQueue : prev;
+              });
+            } catch (syncErr) {
+              console.warn('Failed to synchronize uploadQueue from processing_jobs:', syncErr);
+            }
+          }
+
           if (data) {
             const mappedDocs: DocumentItem[] = data.map((doc: any) => {
               const job = newestJobsMap[doc.id];
@@ -260,6 +307,21 @@ export default function DocumentsView() {
   useEffect(() => {
     refreshData();
   }, [activeOrg]);
+
+  // Polling database for active jobs
+  useEffect(() => {
+    const hasActiveJobs = uploadQueue.some(item => 
+      !item.id.startsWith('upload-') && item.status !== 'Completed' && item.status !== 'Failed'
+    );
+    
+    if (!hasActiveJobs) return;
+
+    const intervalId = setInterval(() => {
+      refreshData();
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, [uploadQueue, activeOrg]);
 
   // Drag and drop handlers
   const handleDragOver = (e: React.DragEvent) => {
@@ -415,6 +477,13 @@ export default function DocumentsView() {
               if (insertError) throw insertError;
               if (insertedDoc) {
                 realInsertedDocId = insertedDoc.id;
+                // Update the uploadQueue item ID to the real inserted doc ID immediately
+                setUploadQueue(prev => prev.map(item => {
+                  if (item.id === id) {
+                    return { ...item, id: insertedDoc.id };
+                  }
+                  return item;
+                }));
                 try {
                   await supabase
                     .from('processing_jobs')
@@ -463,20 +532,27 @@ export default function DocumentsView() {
             }
 
             // Update state
-            setDocuments(prev => [addedDoc, ...prev]);
-            
-            // Mark completed in upload progress widget
-            setUploadQueue(prev => prev.map(item => {
-              if (item.id === id) {
-                return { ...item, status: 'Completed' };
-              }
-              return item;
-            }));
+            if (realInsertedDocId) {
+              setDocuments(prev => {
+                if (prev.some(d => d.id === realInsertedDocId)) return prev;
+                return [addedDoc, ...prev];
+              });
+            } else {
+              setDocuments(prev => [addedDoc, ...prev]);
+              
+              // Mark completed in upload progress widget
+              setUploadQueue(prev => prev.map(item => {
+                if (item.id === id) {
+                  return { ...item, status: 'Completed' };
+                }
+                return item;
+              }));
 
-            // Auto-clear from active queue after 5 seconds
-            setTimeout(() => {
-              setUploadQueue(prev => prev.filter(item => item.id !== id));
-            }, 5000);
+              // Auto-clear from active queue after 5 seconds
+              setTimeout(() => {
+                setUploadQueue(prev => prev.filter(item => item.id !== id));
+              }, 5000);
+            }
 
           }, 1200);
         }, 1000);
