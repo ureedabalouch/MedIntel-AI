@@ -415,6 +415,20 @@ export default function DocumentsView() {
               if (insertError) throw insertError;
               if (insertedDoc) {
                 realInsertedDocId = insertedDoc.id;
+                try {
+                  await supabase
+                    .from('processing_jobs')
+                    .insert({
+                      document_id: insertedDoc.id,
+                      organization_id: activeOrg.id,
+                      job_type: 'indexing',
+                      status: 'queued',
+                      progress_percentage: 0,
+                      current_step: 'Queued for processing'
+                    });
+                } catch (jobErr) {
+                  console.warn('Failed to create processing job for document:', insertedDoc.id, jobErr);
+                }
               }
             } catch (err) {
               console.warn('Real Supabase upload/insert failed (falling back to simulator):', err);
@@ -562,6 +576,20 @@ export default function DocumentsView() {
         if (insertError) throw insertError;
         if (insertedDoc) {
           realInsertedDocId = insertedDoc.id;
+          try {
+            await supabase
+              .from('processing_jobs')
+              .insert({
+                document_id: insertedDoc.id,
+                organization_id: activeOrg.id,
+                job_type: 'indexing',
+                status: 'queued',
+                progress_percentage: 0,
+                current_step: 'Queued for processing'
+              });
+          } catch (jobErr) {
+            console.warn('Failed to create processing job for document:', insertedDoc.id, jobErr);
+          }
         }
       } catch (err) {
         console.warn('Real Supabase manual upload/insert failed (falling back to simulator):', err);
