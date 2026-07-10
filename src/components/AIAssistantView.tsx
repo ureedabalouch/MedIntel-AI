@@ -20,6 +20,7 @@ import {
 import { supabaseSim } from '../lib/supabaseSim';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 import { searchSemanticChunks, RetrievalResult } from '../lib/documentRetrieval';
+import { rerankChunks } from '../lib/documentReranker';
 import { GoogleGenAI } from '@google/genai';
 
 interface Citation {
@@ -265,16 +266,22 @@ export default function AIAssistantView() {
     const docFilter = selectedDocId === 'All' ? undefined : selectedDocId;
 
     try {
-      // Step 1 & 2: Generate Query Embedding & Search Semantic Chunks
+      // Step 1 & 2: Generate Query Embedding & Search Semantic Chunks (Top 20 candidates)
       const retrieved: RetrievalResult[] = await searchSemanticChunks(text, {
         organizationId: activeOrg.id,
         documentId: docFilter,
-        matchCount: 5,
+        matchCount: 20,
         matchThreshold: 0.1
       });
 
-      // Format grounded citations for display
-      const citations: Citation[] = retrieved.map((chunk) => ({
+      // Step 2b: Apply Intelligent Retrieval Reranking (scores by similarity, keyword overlap, length, metadata)
+      const reranked = rerankChunks(retrieved, {
+        query: text,
+        topK: 5
+      });
+
+      // Format grounded citations for display from the top 5 reranked chunks
+      const citations: Citation[] = reranked.map((chunk) => ({
         document_id: chunk.document_id,
         chunk_index: chunk.chunk_index,
         similarity: chunk.similarity,
@@ -282,19 +289,20 @@ export default function AIAssistantView() {
         document_title: docMap[chunk.document_id] || chunk.document_id
       }));
 
-      // Assemble clinical reasoning steps
+      // Assemble clinical reasoning steps including the reranking stage
       const steps = [
         'Generated query embedding vector (1536-dimensional) using gemini-embedding-2-preview.',
         `Searched pgvector index under secure organization context [${activeOrg.name}].`,
-        `Retrieved ${retrieved.length} relevant document chunks above similarity threshold.`,
+        `Retrieved ${retrieved.length} relevant candidate document chunks above similarity threshold (max 20).`,
+        `Applied multi-attribute reranking on candidates to filter down to Top ${reranked.length} optimal chunks based on semantic weight, keyword overlap, length, and metadata quality.`,
         'Enforced strict tenant-isolation and zero-hallucination policies.'
       ];
 
       let responseText = '';
 
-      if (retrieved.length === 0) {
+      if (reranked.length === 0) {
         responseText = 'No supporting medical documentation was found in the secure index to answer this query.';
-        steps.push('No matching chunks discovered. Responding with safe zero-hallucination notice.');
+        steps.push('No matching chunks discovered after reranking. Responding with safe zero-hallucination notice.');
       } else {
         // Step 3: Build Grounded Prompt with System Instructions, Context, History, and Question
         const historyText = messages
@@ -302,8 +310,8 @@ export default function AIAssistantView() {
           .map(m => `${m.sender === 'user' ? 'Clinician' : 'MedIntel AI'}: ${m.content}`)
           .join('\n\n');
 
-        const contextText = retrieved
-          .map((c, i) => `[Reference ${i + 1}] (File: ${docMap[c.document_id] || c.document_id}, Chunk #${c.chunk_index}, Similarity: ${(c.similarity * 100).toFixed(1)}%)\nContent: ${c.content}`)
+        const contextText = reranked
+          .map((c, i) => `[Reference ${i + 1}] (File: ${docMap[c.document_id] || c.document_id}, Chunk #${c.chunk_index}, Combined Score: ${(c.similarity * 100).toFixed(1)}%)\nContent: ${c.content}`)
           .join('\n\n');
 
         const systemInstruction = `You are "MedIntel AI", a secure, highly clinical decision support assistant grounded strictly in private health indexes and verified medical guidelines.
@@ -341,12 +349,12 @@ ${text}`;
             steps.push('Successfully synthesized grounded clinical guidelines response from Gemini.');
           } catch (modelErr) {
             console.warn('[AIAssistantView] Gemini API call failed. Initiating high-fidelity simulated local RAG response.', modelErr);
-            responseText = getSimulatedClinicalResponse(text, retrieved);
+            responseText = getSimulatedClinicalResponse(text, reranked);
             steps.push('Gemini API query failed. Executing deterministic offline RAG matching fallback.');
           }
         } else {
           console.log('[AIAssistantView] No API key or simulator active. Generating high-fidelity simulated response.');
-          responseText = getSimulatedClinicalResponse(text, retrieved);
+          responseText = getSimulatedClinicalResponse(text, reranked);
           steps.push('Supabase / Gemini is unavailable. Performing high-fidelity client-side RAG fallback.');
         }
       }
