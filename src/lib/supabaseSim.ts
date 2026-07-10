@@ -9,6 +9,7 @@ interface DbState {
   memberships: Membership[];
   documents: DocumentItem[];
   categories: CustomCategory[];
+  document_chunks?: any[];
   session: {
     user: User | null;
     profile: Profile | null;
@@ -331,6 +332,9 @@ class SupabaseSimulator {
         if (!parsed.categories) {
           parsed.categories = [...DEFAULT_CATEGORIES];
         }
+        if (!parsed.document_chunks) {
+          parsed.document_chunks = [];
+        }
         return parsed;
       } catch (e) {
         return this.getInitialState();
@@ -347,6 +351,7 @@ class SupabaseSimulator {
       memberships: [...DEFAULT_MEMBERSHIPS],
       documents: [...DEFAULT_DOCUMENTS],
       categories: [...DEFAULT_CATEGORIES],
+      document_chunks: [],
       session: {
         user: DEFAULT_USERS[0],
         profile: DEFAULT_PROFILES[0],
@@ -1091,6 +1096,32 @@ class SupabaseSimulator {
       organizationsCount: this.state.organizations.length,
       membershipsCount: this.state.memberships.length
     };
+  }
+
+  // Chunks / Vector simulator persistence operations
+  public getDocumentChunks(documentId: string): any[] {
+    if (!this.state.document_chunks) {
+      this.state.document_chunks = [];
+    }
+    return this.state.document_chunks.filter((chunk: any) => chunk.document_id === documentId);
+  }
+
+  public storeSimulatedChunks(documentId: string, chunksList: any[]) {
+    if (!this.state.document_chunks) {
+      this.state.document_chunks = [];
+    }
+    // Delete existing chunks for this document to satisfy unique constraint
+    this.state.document_chunks = this.state.document_chunks.filter((chunk: any) => chunk.document_id !== documentId);
+    
+    // Add new ones
+    this.state.document_chunks.push(...chunksList);
+    this.save();
+    
+    this.logAction(
+      'VECTORS_STORE_SUCCESS',
+      'SUCCESS',
+      `Securely persisted ${chunksList.length} text chunks & embedding vectors for simulated document ${documentId}`
+    );
   }
 }
 
