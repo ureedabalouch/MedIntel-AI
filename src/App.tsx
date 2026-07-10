@@ -23,25 +23,47 @@ export default function App() {
     const checkSession = async () => {
       const supabase = getSupabaseClient();
       if (supabase) {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-          // If profile information is needed, fetch it from the public.profiles table using the authenticated user's ID
-          // (App.tsx doesn't use the full_name/role directly, but we query profiles to satisfy requirements)
-          try {
-            await supabase
-              .from('profiles')
-              .select('id, email, full_name, job_title, avatar_url')
-              .eq('id', session.user.id)
-              .single();
-          } catch (err) {
-            console.error('Error fetching profile from real database:', err);
-          }
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            // If profile information is needed, fetch it from the public.profiles table using the authenticated user's ID
+            // (App.tsx doesn't use the full_name/role directly, but we query profiles to satisfy requirements)
+            try {
+              await supabase
+                .from('profiles')
+                .select('id, email, full_name, job_title, avatar_url')
+                .eq('id', session.user.id)
+                .single();
+            } catch (err) {
+              console.error('Error fetching profile from real database:', err);
+            }
 
-          const simSession = supabaseSim.getSession();
-          if (simSession && simSession.activeOrg) {
-            setView('platform');
+            const simSession = supabaseSim.getSession();
+            if (simSession && simSession.activeOrg) {
+              setView('platform');
+            } else {
+              setView('onboarding');
+            }
           } else {
-            setView('onboarding');
+            const session = supabaseSim.getSession();
+            if (session) {
+              if (session.activeOrg) {
+                setView('platform');
+              } else {
+                setView('onboarding');
+              }
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch session from real Supabase:', err);
+          // Fallback to simulator
+          const session = supabaseSim.getSession();
+          if (session) {
+            if (session.activeOrg) {
+              setView('platform');
+            } else {
+              setView('onboarding');
+            }
           }
         }
       } else {
@@ -61,12 +83,24 @@ export default function App() {
   const handleLaunchPlatform = async () => {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        setView('auth');
-      } else {
-        const simSession = supabaseSim.getSession();
-        if (!simSession || !simSession.activeOrg) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          setView('auth');
+        } else {
+          const simSession = supabaseSim.getSession();
+          if (!simSession || !simSession.activeOrg) {
+            setView('onboarding');
+          } else {
+            setView('platform');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch session on launch platform:', err);
+        const session = supabaseSim.getSession();
+        if (!session) {
+          setView('auth');
+        } else if (!session.activeOrg) {
           setView('onboarding');
         } else {
           setView('platform');
@@ -87,16 +121,26 @@ export default function App() {
   const handleAuthSuccess = async () => {
     const supabase = getSupabaseClient();
     if (supabase) {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const simSession = supabaseSim.getSession();
-        if (!simSession || !simSession.activeOrg) {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const simSession = supabaseSim.getSession();
+          if (!simSession || !simSession.activeOrg) {
+            setView('onboarding');
+          } else {
+            setView('platform');
+          }
+        } else {
+          setView('onboarding');
+        }
+      } catch (err) {
+        console.error('Failed to fetch session on auth success:', err);
+        const session = supabaseSim.getSession();
+        if (!session?.activeOrg) {
           setView('onboarding');
         } else {
           setView('platform');
         }
-      } else {
-        setView('onboarding');
       }
     } else {
       const session = supabaseSim.getSession();
