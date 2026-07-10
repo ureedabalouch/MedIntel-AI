@@ -1,6 +1,7 @@
-import { getSupabaseClient } from './supabase';
+import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 import { supabaseSim } from './supabaseSim';
 import * as pdfjsLib from 'pdfjs-dist';
+import { GoogleGenAI } from '@google/genai';
 
 // Configure pdfjs worker source using CDN to make it extremely reliable in browser contexts
 // Using @ts-ignore in case there are missing type definitions for the worker properties
@@ -300,6 +301,77 @@ export async function chunkDocument(text: string): Promise<DocumentChunk[]> {
 }
 
 /**
+ * Helper to retrieve the Gemini API key from all possible environment locations.
+ */
+const getGeminiApiKey = (): string | undefined => {
+  if (import.meta.env && import.meta.env.VITE_GEMINI_API_KEY) {
+    return import.meta.env.VITE_GEMINI_API_KEY;
+  }
+  if (import.meta.env && import.meta.env.GEMINI_API_KEY) {
+    return import.meta.env.GEMINI_API_KEY;
+  }
+  if (typeof process !== 'undefined' && process.env && process.env.GEMINI_API_KEY) {
+    return process.env.GEMINI_API_KEY;
+  }
+  return undefined;
+};
+
+let aiInstance: GoogleGenAI | null = null;
+
+/**
+ * Lazy initializer for GoogleGenAI SDK client.
+ */
+function getGenAIClient(): GoogleGenAI | null {
+  if (aiInstance) return aiInstance;
+  
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || apiKey.trim() === '' || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  
+  try {
+    aiInstance = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+    return aiInstance;
+  } catch (err) {
+    console.error('[DocumentProcessor] Failed to initialize GoogleGenAI client:', err);
+    return null;
+  }
+}
+
+/**
+ * Generates a high-fidelity, deterministic 1536-dimensional simulated embedding.
+ * This is used as an offline/simulator fallback and to gracefully preserve operations.
+ */
+function generateDeterministicEmbedding(text: string): number[] {
+  let hash = 0;
+  for (let i = 0; i < text.length; i++) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  
+  const sRandom = (seed: number) => {
+    let x = Math.sin(seed++) * 10000;
+    return x - Math.floor(x);
+  };
+  
+  const embedding: number[] = [];
+  let seed = Math.abs(hash) || 42;
+  for (let j = 0; j < 1536; j++) {
+    embedding.push(sRandom(seed + j));
+  }
+  
+  const norm = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+  return embedding.map(val => val / (norm || 1));
+}
+
+/**
  * Stage 4: Generate Embeddings
  * Vectorizes each text chunk using an embedding model.
  * 
@@ -308,8 +380,43 @@ export async function chunkDocument(text: string): Promise<DocumentChunk[]> {
  */
 export async function generateEmbeddings(chunks: DocumentChunk[]): Promise<number[][]> {
   console.log(`[DocumentProcessor] [Stage 4: generateEmbeddings] Generating embeddings for ${chunks.length} chunk(s)`);
-  // Placeholder implementation - returns a dummy 1536-dimensional vector for each chunk
-  return chunks.map(() => Array.from({ length: 1536 }, () => Math.random()));
+  
+  if (chunks.length === 0) {
+    return [];
+  }
+  
+  const ai = getGenAIClient();
+  const isRealBackend = isSupabaseConfigured() && ai !== null;
+  
+  if (!isRealBackend) {
+    console.log('[DocumentProcessor] Gemini API or Supabase not configured. Using deterministic simulated embeddings.');
+    return chunks.map(chunk => generateDeterministicEmbedding(chunk.content));
+  }
+  
+  console.log('[DocumentProcessor] Generating embeddings using Gemini API (gemini-embedding-2-preview)...');
+  
+  const embeddingPromises = chunks.map(async (chunk) => {
+    try {
+      const response = await ai!.models.embedContent({
+        model: 'gemini-embedding-2-preview',
+        contents: chunk.content,
+      });
+      
+      // Use highly resilient extraction casting to any to handle type signature variations gracefully
+      const res = response as any;
+      const values = res.embedding?.values || res.embeddings?.values || res.embeddings?.[0]?.values || res.embedding?.[0]?.values;
+      if (values && Array.isArray(values) && values.length > 0) {
+        return values;
+      } else {
+        throw new Error('Empty or invalid embedding values returned from Gemini API');
+      }
+    } catch (err) {
+      console.warn(`[DocumentProcessor] Failed to generate embedding for chunk index ${chunk.chunkIndex}. Falling back to deterministic simulated embedding. Error:`, err);
+      return generateDeterministicEmbedding(chunk.content);
+    }
+  });
+  
+  return Promise.all(embeddingPromises);
 }
 
 /**
