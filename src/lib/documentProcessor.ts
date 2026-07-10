@@ -180,17 +180,123 @@ This clinical record represents a structured document mapping critical patient i
   return "Unsupported document type";
 }
 
+export interface DocumentChunk {
+  chunkIndex: number;
+  content: string;
+}
+
 /**
  * Stage 3: Chunk Document
  * Splits the extracted text into semantically coherent segments/chunks.
  * 
+ * - Approximately 1800–2200 characters per chunk (roughly equivalent to ~500 tokens)
+ * - Approximately 350–450 characters overlap between adjacent chunks (targeted exactly at 400 characters)
+ * - Never split inside a word
+ * - Preserve paragraph boundaries whenever possible (\n\n, then \n, then sentence boundaries)
+ * - Trim unnecessary whitespace
+ * - Ignore empty chunks
+ * 
  * @param text The raw extracted text.
- * @returns Array of text chunks.
+ * @returns Array of structured DocumentChunk objects.
  */
-export async function chunkDocument(text: string): Promise<string[]> {
+export async function chunkDocument(text: string): Promise<DocumentChunk[]> {
   console.log(`[DocumentProcessor] [Stage 3: chunkDocument] Chunking text. Characters input: ${text.length}`);
-  // Placeholder implementation - returns a single chunk for now
-  return [text];
+  
+  const chunks: DocumentChunk[] = [];
+  const cleanText = text.trim();
+  
+  if (!cleanText) {
+    console.log('[DocumentProcessor] [Stage 3: chunkDocument] Input text is empty. Returning 0 chunks.');
+    return [];
+  }
+  
+  const minChunkSize = 1800;
+  const maxChunkSize = 2200;
+  const overlapSize = 400; // mid-point of 350-450
+  
+  // If the total text length is within the max chunk size, return it as a single chunk
+  if (cleanText.length <= maxChunkSize) {
+    console.log(`[DocumentProcessor] Text fits within a single chunk of length ${cleanText.length}.`);
+    return [{ chunkIndex: 0, content: cleanText }];
+  }
+  
+  let cursor = 0;
+  let chunkIndex = 0;
+  
+  while (cursor < cleanText.length) {
+    // If the remaining characters fit comfortably in one final chunk, wrap it up
+    if (cleanText.length - cursor <= maxChunkSize) {
+      const content = cleanText.substring(cursor).trim();
+      if (content) {
+        chunks.push({ chunkIndex: chunkIndex++, content });
+      }
+      break;
+    }
+    
+    // Determine bounds for our search window to locate a good split point
+    const minEnd = cursor + minChunkSize;
+    const maxEnd = cursor + maxChunkSize;
+    
+    let splitPoint = -1;
+    
+    // 1. Try to split at a paragraph boundary (\n\n)
+    const lastDoubleNewline = cleanText.lastIndexOf('\n\n', maxEnd);
+    if (lastDoubleNewline >= minEnd) {
+      splitPoint = lastDoubleNewline + 2; // Split after the newlines to preserve boundary clean-up
+    } else {
+      // 2. Try to split at a single newline (\n)
+      const lastNewline = cleanText.lastIndexOf('\n', maxEnd);
+      if (lastNewline >= minEnd) {
+        splitPoint = lastNewline + 1;
+      } else {
+        // 3. Try to split at a sentence boundary (". " or "? " or "! ")
+        const lastPeriod = cleanText.lastIndexOf('. ', maxEnd);
+        const lastQuestion = cleanText.lastIndexOf('? ', maxEnd);
+        const lastExclamation = cleanText.lastIndexOf('! ', maxEnd);
+        
+        const bestSentenceEnd = Math.max(lastPeriod, lastQuestion, lastExclamation);
+        if (bestSentenceEnd >= minEnd) {
+          splitPoint = bestSentenceEnd + 2; // Split after sentence punctuation and space
+        } else {
+          // 4. Fall back to splitting at a word boundary (space)
+          const lastSpace = cleanText.lastIndexOf(' ', maxEnd);
+          if (lastSpace >= minEnd) {
+            splitPoint = lastSpace + 1;
+          }
+        }
+      }
+    }
+    
+    // Safety check: if no clean boundary is found in the [minEnd, maxEnd] range,
+    // find the first word boundary (space) moving backwards from maxEnd all the way to cursor.
+    if (splitPoint === -1) {
+      const lastSpaceAnywhere = cleanText.lastIndexOf(' ', maxEnd);
+      if (lastSpaceAnywhere > cursor) {
+        splitPoint = lastSpaceAnywhere + 1;
+      } else {
+        // Absolute fallback: perform a hard split at maxEnd to prevent infinite loops
+        splitPoint = maxEnd;
+      }
+    }
+    
+    const chunkText = cleanText.substring(cursor, splitPoint).trim();
+    if (chunkText) {
+      chunks.push({ chunkIndex: chunkIndex++, content: chunkText });
+    }
+    
+    // Advance the cursor by subtracting the overlap size from our split point
+    let nextCursor = splitPoint - overlapSize;
+    
+    // Prevent infinite loops or backwards movement if something weird happens with overlap
+    if (nextCursor <= cursor) {
+      nextCursor = splitPoint;
+    }
+    
+    cursor = nextCursor;
+  }
+  
+  console.log(`[DocumentProcessor] Completed chunking. Created ${chunks.length} chunks.`);
+  return chunks;
 }
 
 /**
@@ -200,7 +306,7 @@ export async function chunkDocument(text: string): Promise<string[]> {
  * @param chunks The text chunks to vectorize.
  * @returns Array of vectors representing each chunk.
  */
-export async function generateEmbeddings(chunks: string[]): Promise<number[][]> {
+export async function generateEmbeddings(chunks: DocumentChunk[]): Promise<number[][]> {
   console.log(`[DocumentProcessor] [Stage 4: generateEmbeddings] Generating embeddings for ${chunks.length} chunk(s)`);
   // Placeholder implementation - returns a dummy 1536-dimensional vector for each chunk
   return chunks.map(() => Array.from({ length: 1536 }, () => Math.random()));
@@ -214,7 +320,7 @@ export async function generateEmbeddings(chunks: string[]): Promise<number[][]> 
  * @param chunks The raw text chunks.
  * @param vectors The corresponding vectors.
  */
-export async function storeVectors(documentId: string, chunks: string[], vectors: number[][]): Promise<boolean> {
+export async function storeVectors(documentId: string, chunks: DocumentChunk[], vectors: number[][]): Promise<boolean> {
   console.log(`[DocumentProcessor] [Stage 5: storeVectors] Storing ${vectors.length} vectors and chunks for document: ${documentId}`);
   // Placeholder implementation - always returns true for now
   return true;
