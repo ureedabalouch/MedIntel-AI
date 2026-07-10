@@ -101,8 +101,44 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
               if (job) {
                 if (job.status === 'queued') statusVal = 'Uploading';
                 else if (job.status === 'running') statusVal = 'Processing';
-                else if (job.status === 'completed') statusVal = 'Ready';
-                else if (job.status === 'failed') statusVal = 'Failed';
+                else if (job.status === 'completed') {
+                  statusVal = 'Ready';
+                  if (doc.status !== 'indexed' && doc.status !== 'Ready') {
+                    const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                    if (isUUID(doc.id)) {
+                      try {
+                        (async () => {
+                          const { error } = await supabase
+                            .from('documents')
+                            .update({ status: 'indexed' })
+                            .eq('id', doc.id);
+                          if (error) console.warn('Failed to sync document status to indexed:', error);
+                        })().catch(err => console.warn('Failed to sync document status to indexed:', err));
+                      } catch (err) {
+                        console.warn('Failed to sync document status:', err);
+                      }
+                    }
+                  }
+                }
+                else if (job.status === 'failed') {
+                  statusVal = 'Failed';
+                  if (doc.status !== 'failed' && doc.status !== 'Failed') {
+                    const isUUID = (val: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val);
+                    if (isUUID(doc.id)) {
+                      try {
+                        (async () => {
+                          const { error } = await supabase
+                            .from('documents')
+                            .update({ status: 'failed' })
+                            .eq('id', doc.id);
+                          if (error) console.warn('Failed to sync document status to failed:', error);
+                        })().catch(err => console.warn('Failed to sync document status to failed:', err));
+                      } catch (err) {
+                        console.warn('Failed to sync document status:', err);
+                      }
+                    }
+                  }
+                }
               } else {
                 statusVal = doc.status === 'indexed' || doc.status === 'Ready' ? 'Ready' : 
                             doc.status === 'processing' || doc.status === 'Indexing' ? 'Indexing' : 
