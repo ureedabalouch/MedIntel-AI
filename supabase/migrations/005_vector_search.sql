@@ -74,3 +74,48 @@ CREATE TRIGGER trigger_document_chunks_updated_at
 BEFORE UPDATE ON public.document_chunks
 FOR EACH ROW
 EXECUTE FUNCTION update_updated_at_column();
+
+--------------------------------------------------------------------------------
+-- 4. VECTOR SIMILARITY SEARCH FUNCTION (RPC)
+--------------------------------------------------------------------------------
+-- Performs cosine similarity search using <=> operator
+CREATE OR REPLACE FUNCTION public.match_document_chunks(
+    query_embedding vector(1536),
+    match_threshold float,
+    match_count int,
+    filter_organization_id uuid DEFAULT NULL,
+    filter_document_id uuid DEFAULT NULL
+)
+RETURNS TABLE (
+    id uuid,
+    document_id uuid,
+    organization_id uuid,
+    chunk_index int,
+    content text,
+    metadata jsonb,
+    similarity float
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        dc.id,
+        dc.document_id,
+        dc.organization_id,
+        dc.chunk_index,
+        dc.content,
+        dc.metadata,
+        (1 - (dc.embedding <=> query_embedding))::float AS similarity
+    FROM public.document_chunks dc
+    WHERE
+        (filter_organization_id IS NULL OR dc.organization_id = filter_organization_id)
+        AND (filter_document_id IS NULL OR dc.document_id = filter_document_id)
+        AND (1 - (dc.embedding <=> query_embedding)) > match_threshold
+    ORDER BY dc.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON FUNCTION public.match_document_chunks(vector(1536), float, int, uuid, uuid) IS 'Performs pgvector cosine similarity search on document chunks under strict tenant isolation.';
+
