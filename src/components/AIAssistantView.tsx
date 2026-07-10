@@ -21,6 +21,7 @@ import { supabaseSim } from '../lib/supabaseSim';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 import { searchSemanticChunks, RetrievalResult } from '../lib/documentRetrieval';
 import { rerankChunks } from '../lib/documentReranker';
+import { searchHybridChunks } from '../lib/hybridSearch';
 import { GoogleGenAI } from '@google/genai';
 
 interface Citation {
@@ -266,15 +267,14 @@ export default function AIAssistantView() {
     const docFilter = selectedDocId === 'All' ? undefined : selectedDocId;
 
     try {
-      // Step 1 & 2: Generate Query Embedding & Search Semantic Chunks (Top 20 candidates)
-      const retrieved: RetrievalResult[] = await searchSemanticChunks(text, {
+      // Step 1 & 2: Execute Hybrid Search (combining pgvector semantic search and PostgreSQL FTS)
+      const retrieved: RetrievalResult[] = await searchHybridChunks(text, {
         organizationId: activeOrg.id,
         documentId: docFilter,
-        matchCount: 20,
-        matchThreshold: 0.1
+        matchCount: 20
       });
 
-      // Step 2b: Apply Intelligent Retrieval Reranking (scores by similarity, keyword overlap, length, metadata)
+      // Step 3: Apply Intelligent Retrieval Reranking (scores by similarity, keyword overlap, length, metadata)
       const reranked = rerankChunks(retrieved, {
         query: text,
         topK: 5
@@ -289,12 +289,12 @@ export default function AIAssistantView() {
         document_title: docMap[chunk.document_id] || chunk.document_id
       }));
 
-      // Assemble clinical reasoning steps including the reranking stage
+      // Assemble clinical reasoning steps including the hybrid search and reranking stages
       const steps = [
         'Generated query embedding vector (1536-dimensional) using gemini-embedding-2-preview.',
-        `Searched pgvector index under secure organization context [${activeOrg.name}].`,
-        `Retrieved ${retrieved.length} relevant candidate document chunks above similarity threshold (max 20).`,
-        `Applied multi-attribute reranking on candidates to filter down to Top ${reranked.length} optimal chunks based on semantic weight, keyword overlap, length, and metadata quality.`,
+        `Executed multi-tenant Hybrid Search combining pgvector (70% weight) and PostgreSQL Full-Text Search (30% weight) inside organization context [${activeOrg.name}].`,
+        `Retrieved and merged ${retrieved.length} unique candidate chunks from semantic and lexical index passes (max 20).`,
+        `Applied multi-attribute reranking on merged candidates to filter down to Top ${reranked.length} optimal chunks based on semantic weight, keyword overlap, length, and metadata quality.`,
         'Enforced strict tenant-isolation and zero-hallucination policies.'
       ];
 

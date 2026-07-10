@@ -119,3 +119,47 @@ $$;
 
 COMMENT ON FUNCTION public.match_document_chunks(vector(1536), float, int, uuid, uuid) IS 'Performs pgvector cosine similarity search on document chunks under strict tenant isolation.';
 
+--------------------------------------------------------------------------------
+-- 5. FULL-TEXT SEARCH FUNCTION (RPC)
+--------------------------------------------------------------------------------
+-- Performs full-text search with ranking using ts_rank_cd and websearch_to_tsquery
+CREATE OR REPLACE FUNCTION public.fts_document_chunks(
+    query_text text,
+    match_count int,
+    filter_organization_id uuid DEFAULT NULL,
+    filter_document_id uuid DEFAULT NULL
+)
+RETURNS TABLE (
+    id uuid,
+    document_id uuid,
+    organization_id uuid,
+    chunk_index int,
+    content text,
+    metadata jsonb,
+    rank float
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        dc.id,
+        dc.document_id,
+        dc.organization_id,
+        dc.chunk_index,
+        dc.content,
+        dc.metadata,
+        ts_rank_cd(to_tsvector('english', dc.content), websearch_to_tsquery('english', query_text))::float AS rank
+    FROM public.document_chunks dc
+    WHERE
+        (filter_organization_id IS NULL OR dc.organization_id = filter_organization_id)
+        AND (filter_document_id IS NULL OR dc.document_id = filter_document_id)
+        AND to_tsvector('english', dc.content) @@ websearch_to_tsquery('english', query_text)
+    ORDER BY rank DESC
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON FUNCTION public.fts_document_chunks(text, int, uuid, uuid) IS 'Performs PostgreSQL native full-text search on document chunks under strict tenant isolation.';
+
+
