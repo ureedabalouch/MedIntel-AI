@@ -37,6 +37,7 @@ import {
 import { DocumentItem, CustomCategory } from '../types';
 import { supabaseSim } from '../lib/supabaseSim';
 import { getSupabaseClient } from '../lib/supabase';
+import { orchestrateAndTrackDocumentProcessing } from '../lib/documentProcessor';
 
 interface UploadProgressItem {
   id: string;
@@ -174,18 +175,24 @@ export default function DocumentsView() {
 
           // Query the public.processing_jobs table if a real Supabase client is configured
           let jobsData: any[] = [];
-          try {
-            const { data: fetchedJobs, error: jobsError } = await supabase
-              .from('processing_jobs')
-              .select('*')
-              .eq('organization_id', activeOrg.id);
-            if (!jobsError && fetchedJobs) {
-              jobsData = fetchedJobs;
-            } else if (jobsError) {
-              console.warn('Real Supabase processing jobs query failed:', jobsError);
+          if (supabase) {
+            try {
+              const { data: fetchedJobs, error: jobsError } = await supabase
+                .from('processing_jobs')
+                .select('*')
+                .eq('organization_id', activeOrg.id);
+              if (!fetchedJobs && jobsError) {
+                console.warn('Real Supabase processing jobs query failed, falling back to simulator:', jobsError);
+                jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
+              } else if (fetchedJobs) {
+                jobsData = fetchedJobs;
+              }
+            } catch (err) {
+              console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+              jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
             }
-          } catch (err) {
-            console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+          } else {
+            jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
           }
 
           // Map from document_id to the newest processing job
@@ -335,13 +342,48 @@ export default function DocumentsView() {
         setDocuments(loadedDocuments);
       } else {
         const orgDocs = supabaseSim.getDocuments(activeOrg.id);
-        setDocuments(orgDocs);
+        const simJobs = supabaseSim.getProcessingJobs(activeOrg.id);
+        const newestSimJobsMap: { [docId: string]: any } = {};
+        simJobs.forEach(job => {
+          const existingJob = newestSimJobsMap[job.document_id];
+          if (!existingJob || new Date(job.created_at) > new Date(existingJob.created_at)) {
+            newestSimJobsMap[job.document_id] = job;
+          }
+        });
+
+        const mappedSimDocs = orgDocs.map((doc: any) => {
+          const job = newestSimJobsMap[doc.id];
+          let statusVal = doc.status || 'Ready';
+          if (job) {
+            if (job.status === 'queued') statusVal = 'Uploading';
+            else if (job.status === 'running') statusVal = 'Processing';
+            else if (job.status === 'completed') statusVal = 'Ready';
+            else if (job.status === 'failed') statusVal = 'Failed';
+          }
+          return {
+            ...doc,
+            status: statusVal,
+            progress: job ? job.progress_percentage : undefined,
+            statusMessage: job ? job.current_step : undefined,
+            error: job ? (job.error_message || undefined) : undefined,
+          };
+        });
+        setDocuments(mappedSimDocs);
       }
     }
   };
 
   useEffect(() => {
     refreshData();
+    
+    // Set up a lightweight polling loop for simulated/offline mode processing jobs
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      const interval = setInterval(() => {
+        refreshData();
+      }, 1500);
+      return () => clearInterval(interval);
+    }
   }, [activeOrg]);
 
   // Realtime subscription for processing_jobs in DocumentsView
@@ -596,6 +638,7 @@ export default function DocumentsView() {
               patientId: fileType === 'DICOM' ? 'PAT-' + Math.floor(1000 + Math.random() * 9000) : undefined
             });
 
+            const targetDocId = realInsertedDocId || addedDoc.id;
             if (realInsertedDocId) {
               addedDoc.id = realInsertedDocId;
             }
@@ -622,6 +665,11 @@ export default function DocumentsView() {
                 setUploadQueue(prev => prev.filter(item => item.id !== id));
               }, 5000);
             }
+
+            // Trigger the automated document processing pipeline asynchronously
+            orchestrateAndTrackDocumentProcessing(targetDocId, activeOrg.id).catch(err => {
+              console.error('Failed to run automated processing pipeline:', err);
+            });
 
           }, 1200);
         }, 1000);
@@ -757,6 +805,7 @@ export default function DocumentsView() {
       patientId: newFilePatientId.trim() || undefined
     });
 
+    const targetDocId = realInsertedDocId || added.id;
     if (realInsertedDocId) {
       added.id = realInsertedDocId;
     }
@@ -769,6 +818,11 @@ export default function DocumentsView() {
     setNewFileTags('');
     setNewFilePatientId('');
     setNewFileError('');
+
+    // Trigger the automated document processing pipeline asynchronously
+    orchestrateAndTrackDocumentProcessing(targetDocId, activeOrg.id).catch(err => {
+      console.error('Failed to run automated processing pipeline:', err);
+    });
   };
 
   // Delete Document

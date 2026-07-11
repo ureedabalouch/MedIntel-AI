@@ -643,3 +643,218 @@ export async function processDocument(documentId: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Orchestrates and tracks the complete document ingestion pipeline.
+ * Runs each stage sequentially, updating processing_jobs and document status,
+ * and handles failures gracefully. Works with real Supabase or local simulation.
+ * 
+ * @param documentId The unique ID of the document to process.
+ * @param orgId The organization context ID for RLS scoping.
+ * @returns A promise resolving to a boolean indicating overall success.
+ */
+export async function orchestrateAndTrackDocumentProcessing(documentId: string, orgId: string): Promise<boolean> {
+  console.log(`[DocumentProcessor] Initiating Automated End-to-End processing for document: ${documentId}`);
+  
+  const supabase = getSupabaseClient();
+  const isReal = isSupabaseConfigured() && supabase !== null;
+  
+  let jobId = `job-${Math.random().toString(36).substring(2, 11)}`;
+  
+  // 1. Create processing_jobs record with status 'queued' if it doesn't exist
+  if (isReal && supabase) {
+    try {
+      // Check if job already exists
+      const { data: existingJob } = await supabase
+        .from('processing_jobs')
+        .select('id')
+        .eq('document_id', documentId)
+        .maybeSingle();
+        
+      if (existingJob) {
+        jobId = existingJob.id;
+        // Update existing job to queued
+        await supabase
+          .from('processing_jobs')
+          .update({
+            status: 'queued',
+            progress_percentage: 0,
+            current_step: 'Queued for processing',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', jobId);
+      } else {
+        // Insert new job record
+        const { data: newJob, error: insertErr } = await supabase
+          .from('processing_jobs')
+          .insert({
+            document_id: documentId,
+            organization_id: orgId,
+            job_type: 'indexing',
+            status: 'queued',
+            progress_percentage: 0,
+            current_step: 'Queued for processing',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .select('id')
+          .single();
+          
+        if (!insertErr && newJob) {
+          jobId = newJob.id;
+        }
+      }
+    } catch (err) {
+      console.warn('[DocumentProcessor] Failed to register real processing job:', err);
+    }
+  } else {
+    // Simulator flow
+    const existingJobs = supabaseSim.getProcessingJobs(orgId);
+    const existing = existingJobs.find((j: any) => j.document_id === documentId);
+    if (existing) {
+      jobId = existing.id;
+      supabaseSim.updateProcessingJob(jobId, {
+        status: 'queued',
+        progress_percentage: 0,
+        current_step: 'Queued for processing'
+      });
+    } else {
+      const added = supabaseSim.addProcessingJob({
+        id: jobId,
+        document_id: documentId,
+        organization_id: orgId,
+        job_type: 'indexing',
+        status: 'queued',
+        progress_percentage: 0,
+        current_step: 'Queued for processing'
+      });
+      if (added) jobId = added.id;
+    }
+  }
+
+  // Define helper function to update progress
+  const updateProgress = async (progress: number, step: string, status: string = 'running', errorMsg: string | null = null) => {
+    console.log(`[DocumentProcessor] Job ID ${jobId}: Progress ${progress}%, Step: ${step}, Status: ${status}`);
+    const updates: any = {
+      status,
+      progress_percentage: progress,
+      current_step: step,
+      updated_at: new Date().toISOString()
+    };
+    if (status === 'completed') {
+      updates.completed_at = new Date().toISOString();
+    }
+    if (errorMsg !== null) {
+      updates.error_message = errorMsg;
+    }
+
+    if (isReal && supabase) {
+      try {
+        await supabase
+          .from('processing_jobs')
+          .update(updates)
+          .eq('id', jobId);
+      } catch (err) {
+        console.warn('[DocumentProcessor] Failed to update real processing job status:', err);
+      }
+    } else {
+      supabaseSim.updateProcessingJob(jobId, updates);
+    }
+  };
+
+  try {
+    // Immediately transition it to "running" when processing begins (requirement 2)
+    await updateProgress(5, 'Processing started...', 'running');
+
+    // Stage 1: validateDocument()
+    await updateProgress(10, 'Validating document structure...', 'running');
+    const isValid = await validateDocument(documentId);
+    if (!isValid) {
+      throw new Error('Document validation failed. Record not found in system databases.');
+    }
+    await updateProgress(20, 'Document validated.', 'running');
+
+    // Stage 2: extractText()
+    await updateProgress(30, 'Extracting document text content...', 'running');
+    const rawText = await extractText(documentId);
+    
+    if (rawText === "Unsupported document type") {
+      throw new Error('Unsupported document type or failed text extraction.');
+    }
+    await updateProgress(50, `Text extraction complete (${rawText.length} characters).`, 'running');
+
+    // Stage 3: chunkDocument()
+    await updateProgress(60, 'Splitting text into coherent semantic chunks...', 'running');
+    const chunks = await chunkDocument(rawText);
+    await updateProgress(75, `Text chunked into ${chunks.length} semantic segments.`, 'running');
+
+    // Stage 4: generateEmbeddings()
+    await updateProgress(80, 'Generating vector embeddings using preview model...', 'running');
+    const embeddings = await generateEmbeddings(chunks);
+    await updateProgress(90, 'Embeddings generated successfully.', 'running');
+
+    // Stage 5: storeVectors()
+    await updateProgress(95, 'Storing vectors and chunk metadata in organizational RLS tables...', 'running');
+    const storageSuccess = await storeVectors(documentId, chunks, embeddings);
+    if (!storageSuccess) {
+      throw new Error('Failed to store generated vectors in database.');
+    }
+
+    // 5. On successful completion (requirement 5)
+    await updateProgress(100, 'Document indexed and vectorized successfully.', 'completed');
+    
+    // Update documents.status = "indexed"
+    if (isReal && supabase) {
+      try {
+        await supabase
+          .from('documents')
+          .update({
+            status: 'indexed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', documentId);
+      } catch (err) {
+        console.warn('[DocumentProcessor] Failed to update real document status to indexed:', err);
+      }
+    } else {
+      try {
+        supabaseSim.updateDocumentMetadata(documentId, orgId, { status: 'Ready' });
+      } catch (err) {
+        console.warn('[DocumentProcessor] Failed to update simulated document status to Ready:', err);
+      }
+    }
+
+    console.log(`[DocumentProcessor] Complete automated processing pipeline succeeded for document: ${documentId}`);
+    return true;
+
+  } catch (err: any) {
+    // 6. On failure (requirement 6)
+    const errorMsg = err?.message || 'Unknown processing error';
+    console.error(`[DocumentProcessor] Pipeline error on document ${documentId}:`, errorMsg);
+    
+    await updateProgress(100, `Processing failed: ${errorMsg}`, 'failed', errorMsg);
+
+    // Update documents.status = "failed"
+    if (isReal && supabase) {
+      try {
+        await supabase
+          .from('documents')
+          .update({
+            status: 'failed',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', documentId);
+      } catch (docErr) {
+        console.warn('[DocumentProcessor] Failed to update real document status to failed:', docErr);
+      }
+    } else {
+      try {
+        supabaseSim.updateDocumentMetadata(documentId, orgId, { status: 'Failed' });
+      } catch (docErr) {
+        console.warn('[DocumentProcessor] Failed to update simulated document status to Failed:', docErr);
+      }
+    }
+
+    return false;
+  }
+}

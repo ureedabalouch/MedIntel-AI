@@ -70,18 +70,24 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
 
         // Query the public.processing_jobs table if a real Supabase client is configured
         let jobsData: any[] = [];
-        try {
-          const { data: fetchedJobs, error: jobsError } = await supabase
-            .from('processing_jobs')
-            .select('*')
-            .eq('organization_id', activeOrg.id);
-          if (!jobsError && fetchedJobs) {
-            jobsData = fetchedJobs;
-          } else if (jobsError) {
-            console.warn('Real Supabase processing jobs query failed:', jobsError);
+        if (supabase) {
+          try {
+            const { data: fetchedJobs, error: jobsError } = await supabase
+              .from('processing_jobs')
+              .select('*')
+              .eq('organization_id', activeOrg.id);
+            if (!fetchedJobs && jobsError) {
+              console.warn('Real Supabase processing jobs query failed, falling back to simulator:', jobsError);
+              jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
+            } else if (fetchedJobs) {
+              jobsData = fetchedJobs;
+            }
+          } catch (err) {
+            console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+            jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
           }
-        } catch (err) {
-          console.warn('Real Supabase processing jobs query failed, falling back to simulator:', err);
+        } else {
+          jobsData = supabaseSim.getProcessingJobs(activeOrg.id);
         }
 
         // Map from document_id to the newest processing job
@@ -175,11 +181,46 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
     }
     
     const fallbackDocs = supabaseSim.getDocuments(activeOrg.id);
-    setDocs(fallbackDocs);
+    const simJobs = supabaseSim.getProcessingJobs(activeOrg.id);
+    const newestSimJobsMap: { [docId: string]: any } = {};
+    simJobs.forEach(job => {
+      const existingJob = newestSimJobsMap[job.document_id];
+      if (!existingJob || new Date(job.created_at) > new Date(existingJob.created_at)) {
+        newestSimJobsMap[job.document_id] = job;
+      }
+    });
+
+    const mappedSimDocs = fallbackDocs.map((doc: any) => {
+      const job = newestSimJobsMap[doc.id];
+      let statusVal = doc.status || 'Ready';
+      if (job) {
+        if (job.status === 'queued') statusVal = 'Uploading';
+        else if (job.status === 'running') statusVal = 'Processing';
+        else if (job.status === 'completed') statusVal = 'Ready';
+        else if (job.status === 'failed') statusVal = 'Failed';
+      }
+      return {
+        ...doc,
+        status: statusVal,
+        progress: job ? job.progress_percentage : undefined,
+        statusMessage: job ? job.current_step : undefined,
+        error: job ? (job.error_message || undefined) : undefined,
+      };
+    });
+    setDocs(mappedSimDocs);
   }, [activeOrg]);
 
   useEffect(() => {
     fetchDocs();
+    
+    // Set up a lightweight polling loop for simulated/offline mode processing jobs
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      const interval = setInterval(() => {
+        fetchDocs();
+      }, 1500);
+      return () => clearInterval(interval);
+    }
   }, [fetchDocs]);
 
   // Realtime subscription for processing_jobs in Dashboard

@@ -10,6 +10,7 @@ interface DbState {
   documents: DocumentItem[];
   categories: CustomCategory[];
   document_chunks?: any[];
+  processing_jobs?: any[];
   session: {
     user: User | null;
     profile: Profile | null;
@@ -335,6 +336,9 @@ class SupabaseSimulator {
         if (!parsed.document_chunks) {
           parsed.document_chunks = [];
         }
+        if (!parsed.processing_jobs) {
+          parsed.processing_jobs = [];
+        }
         return parsed;
       } catch (e) {
         return this.getInitialState();
@@ -352,6 +356,7 @@ class SupabaseSimulator {
       documents: [...DEFAULT_DOCUMENTS],
       categories: [...DEFAULT_CATEGORIES],
       document_chunks: [],
+      processing_jobs: [],
       session: {
         user: DEFAULT_USERS[0],
         profile: DEFAULT_PROFILES[0],
@@ -1122,6 +1127,49 @@ class SupabaseSimulator {
       'SUCCESS',
       `Securely persisted ${chunksList.length} text chunks & embedding vectors for simulated document ${documentId}`
     );
+  }
+
+  // --- Processing Jobs Operations ---
+  public getProcessingJobs(orgId: string): any[] {
+    if (!this.state.processing_jobs) {
+      this.state.processing_jobs = [];
+    }
+    return this.state.processing_jobs.filter(job => job.organization_id === orgId);
+  }
+
+  public addProcessingJob(job: any): any {
+    if (!this.state.processing_jobs) {
+      this.state.processing_jobs = [];
+    }
+    const newJob = {
+      id: job.id || `job-${Math.random().toString(36).substring(2, 11)}`,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      ...job
+    };
+    // Filter out any existing jobs for the same document to avoid duplicates in tracking
+    this.state.processing_jobs = this.state.processing_jobs.filter(j => j.document_id !== job.document_id);
+    this.state.processing_jobs.unshift(newJob);
+    this.save();
+    return newJob;
+  }
+
+  public updateProcessingJob(jobId: string, updates: any): any {
+    if (!this.state.processing_jobs) {
+      this.state.processing_jobs = [];
+    }
+    const index = this.state.processing_jobs.findIndex(j => j.id === jobId);
+    if (index !== -1) {
+      const updatedJob = {
+        ...this.state.processing_jobs[index],
+        ...updates,
+        updated_at: new Date().toISOString()
+      };
+      this.state.processing_jobs[index] = updatedJob;
+      this.save();
+      return updatedJob;
+    }
+    return null;
   }
 }
 
