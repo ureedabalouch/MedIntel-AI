@@ -23,7 +23,7 @@ interface DashboardViewProps {
   onNavigateTo: (view: 'dashboard' | 'documents' | 'assistant' | 'search' | 'analytics' | 'settings' | 'support' | 'supabase') => void;
 }
 
-export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
+function DashboardView({ onNavigateTo }: DashboardViewProps) {
   const session = supabaseSim.getSession();
   const activeOrg = session?.activeOrg;
   const [docs, setDocs] = useState<DocumentItem[]>([]);
@@ -551,3 +551,5 @@ export default function DashboardView({ onNavigateTo }: DashboardViewProps) {
     </div>
   );
 }
+
+export default React.memo(DashboardView);

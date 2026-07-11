@@ -2,6 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 import { supabaseSim } from './supabaseSim';
 import * as pdfjsLib from 'pdfjs-dist';
 import { GoogleGenAI } from '@google/genai';
+import { invalidateRetrievalCache } from './retrievalCache';
 
 // Configure pdfjs worker source using CDN to make it extremely reliable in browser contexts
 // Using @ts-ignore in case there are missing type definitions for the worker properties
@@ -378,24 +379,74 @@ function generateDeterministicEmbedding(text: string): number[] {
  * @param chunks The text chunks to vectorize.
  * @returns Array of vectors representing each chunk.
  */
-export async function generateEmbeddings(chunks: DocumentChunk[]): Promise<number[][]> {
+export async function generateEmbeddings(chunks: DocumentChunk[], documentId?: string): Promise<number[][]> {
   console.log(`[DocumentProcessor] [Stage 4: generateEmbeddings] Generating embeddings for ${chunks.length} chunk(s)`);
   
   if (chunks.length === 0) {
     return [];
   }
   
+  const supabase = getSupabaseClient();
   const ai = getGenAIClient();
   const isRealBackend = isSupabaseConfigured() && ai !== null;
+  const EXPECTED_DIMENSION = 1536;
+
+  // Try to find pre-existing embeddings to optimize and skip regeneration (Requirement 3)
+  const existingEmbeddingsMap = new Map<number, number[]>();
+  if (documentId) {
+    if (isRealBackend && supabase) {
+      try {
+        console.log(`[DocumentProcessor] Checking for existing embeddings to reuse for document ${documentId}...`);
+        const { data, error } = await supabase
+          .from('document_chunks')
+          .select('chunk_index, content, embedding')
+          .eq('document_id', documentId);
+        
+        if (!error && data && Array.isArray(data)) {
+          data.forEach((row: any) => {
+            if (row.embedding && Array.isArray(row.embedding) && row.embedding.length === EXPECTED_DIMENSION) {
+              existingEmbeddingsMap.set(row.chunk_index, row.embedding);
+            }
+          });
+        }
+      } catch (err) {
+        console.warn('[DocumentProcessor] Failed to query existing chunks for embedding reuse:', err);
+      }
+    } else {
+      try {
+        const simState = supabaseSim.getRawState();
+        const simChunks = (simState.document_chunks || []).filter((c: any) => c.document_id === documentId);
+        simChunks.forEach((row: any) => {
+          if (row.embedding && Array.isArray(row.embedding) && row.embedding.length === EXPECTED_DIMENSION) {
+            existingEmbeddingsMap.set(row.chunk_index, row.embedding);
+          }
+        });
+      } catch (err) {
+        console.warn('[DocumentProcessor] Failed to query simulated chunks for embedding reuse:', err);
+      }
+    }
+  }
   
   if (!isRealBackend) {
     console.log('[DocumentProcessor] Gemini API or Supabase not configured. Using deterministic simulated embeddings.');
-    return chunks.map(chunk => generateDeterministicEmbedding(chunk.content));
+    return chunks.map(chunk => {
+      if (existingEmbeddingsMap.has(chunk.chunkIndex)) {
+        console.log(`[DocumentProcessor] [EmbeddingReuse] Reusing simulated embedding for chunk index ${chunk.chunkIndex}`);
+        return existingEmbeddingsMap.get(chunk.chunkIndex)!;
+      }
+      return generateDeterministicEmbedding(chunk.content);
+    });
   }
   
   console.log('[DocumentProcessor] Generating embeddings using Gemini API (gemini-embedding-2-preview)...');
   
   const embeddingPromises = chunks.map(async (chunk) => {
+    // Optimization: Skip unnecessary embedding generation if it already exists (Requirement 3)
+    if (existingEmbeddingsMap.has(chunk.chunkIndex)) {
+      console.log(`[DocumentProcessor] [EmbeddingReuse] Reusing existing real embedding for chunk index ${chunk.chunkIndex}`);
+      return existingEmbeddingsMap.get(chunk.chunkIndex)!;
+    }
+
     try {
       const response = await ai!.models.embedContent({
         model: 'gemini-embedding-2-preview',
@@ -1061,7 +1112,7 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
     const embeddings = await executeWithRetry(
       async () => {
         return await runStageWithMetrics('embedding_generation', 'embedding', async () => {
-          return await generateEmbeddings(chunks);
+          return await generateEmbeddings(chunks, documentId);
         });
       },
       'embedding_generation',
@@ -1127,6 +1178,7 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
     });
 
     console.log(`[DocumentProcessor] Complete automated processing pipeline succeeded for document: ${documentId}`);
+    invalidateRetrievalCache();
     return true;
 
   } catch (err: any) {

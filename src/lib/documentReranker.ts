@@ -1,4 +1,5 @@
 import { RetrievalResult } from './documentRetrieval';
+import { getCachedRerank, setCachedRerank } from './retrievalCache';
 
 /**
  * Reranking options parameterizing weights and tuning criteria.
@@ -99,6 +100,12 @@ export function rerankChunks(
   if (!chunks || chunks.length === 0) {
     return [];
   }
+
+  // Check cache (Requirement 2)
+  const cached = getCachedRerank(query, chunks, options);
+  if (cached) {
+    return cached;
+  }
   
   console.log(`[DocumentReranker] Reranking ${chunks.length} chunks for query: "${query}"`);
   
@@ -138,7 +145,10 @@ export function rerankChunks(
   });
   
   // Sort by final combined score descending
-  return reranked
+  const results = reranked
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);
+
+  setCachedRerank(query, chunks, options, results);
+  return results;
 }

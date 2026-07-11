@@ -1,6 +1,7 @@
 import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 import { supabaseSim } from './supabaseSim';
 import { GoogleGenAI } from '@google/genai';
+import { getCachedQueryEmbedding, setCachedQueryEmbedding, getCachedSemanticSearch, setCachedSemanticSearch } from './retrievalCache';
 
 /**
  * Result structure returned by semantic retrieval operations.
@@ -133,6 +134,12 @@ function calculateLexicalSimilarity(query: string, content: string): number {
  * Generates an embedding for a search query using the Gemini API.
  */
 async function generateQueryEmbedding(query: string): Promise<number[] | null> {
+  const cached = getCachedQueryEmbedding(query);
+  if (cached) {
+    console.log('[DocumentRetrieval] Reusing cached query embedding for:', query);
+    return cached;
+  }
+
   const ai = getGenAIClient();
   if (!ai) return null;
   
@@ -145,6 +152,7 @@ async function generateQueryEmbedding(query: string): Promise<number[] | null> {
     const res = response as any;
     const values = res.embedding?.values || res.embeddings?.values || res.embeddings?.[0]?.values || res.embedding?.[0]?.values;
     if (values && Array.isArray(values) && values.length > 0) {
+      setCachedQueryEmbedding(query, values);
       return values;
     }
     return null;
@@ -181,6 +189,12 @@ export async function searchSemanticChunks(
     console.warn('[DocumentRetrieval] Missing organizationId. Enforcing strict security boundaries and returning empty results.');
     return [];
   }
+
+  // Check cache (Requirement 2)
+  const cachedResult = getCachedSemanticSearch(query, options);
+  if (cachedResult) {
+    return cachedResult;
+  }
   
   const supabase = getSupabaseClient();
   const ai = getGenAIClient();
@@ -214,13 +228,15 @@ export async function searchSemanticChunks(
         console.warn('[DocumentRetrieval] Real pgvector search failed. Falling back to simulator.', error);
       } else if (data && Array.isArray(data)) {
         console.log(`[DocumentRetrieval] Successfully matched ${data.length} chunks from database.`);
-        return data.map((row: any) => ({
+        const results = data.map((row: any) => ({
           document_id: row.document_id,
           chunk_index: row.chunk_index,
           content: row.content,
           similarity: typeof row.similarity === 'number' ? row.similarity : 0.0,
           metadata: row.metadata || {}
         }));
+        setCachedSemanticSearch(query, options, results);
+        return results;
       }
     } catch (err) {
       console.warn('[DocumentRetrieval] Exception occurred during real similarity query, falling back to simulator:', err);
@@ -265,6 +281,7 @@ export async function searchSemanticChunks(
       .slice(0, matchCount);
       
     console.log(`[DocumentRetrieval] [Simulator] Returning ${results.length} relevant chunks.`);
+    setCachedSemanticSearch(query, options, results);
     return results;
   } catch (err) {
     console.error('[DocumentRetrieval] Critical error in simulator fallback:', err);

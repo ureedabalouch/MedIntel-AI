@@ -166,7 +166,7 @@ A patient's history of mild hypertension is an independent risk multiplier for T
   });
 }
 
-export default function AIAssistantView() {
+function AIAssistantView() {
   const session = supabaseSim.getSession();
   const activeOrg = session?.activeOrg;
   
@@ -681,3 +681,5 @@ ${text}`;
     </div>
   );
 }
+
+export default React.memo(AIAssistantView);

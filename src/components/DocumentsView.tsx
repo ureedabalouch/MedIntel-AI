@@ -38,6 +38,7 @@ import { DocumentItem, CustomCategory } from '../types';
 import { supabaseSim } from '../lib/supabaseSim';
 import { getSupabaseClient } from '../lib/supabase';
 import { orchestrateAndTrackDocumentProcessing, getIngestionMetrics } from '../lib/documentProcessor';
+import { invalidateRetrievalCache } from '../lib/retrievalCache';
 
 interface UploadProgressItem {
   id: string;
@@ -51,7 +52,7 @@ interface UploadProgressItem {
   statusMessage?: string;
 }
 
-export default function DocumentsView() {
+function DocumentsView() {
   const session = supabaseSim.getSession();
   const activeOrg = session?.activeOrg;
   const profile = session?.profile;
@@ -67,6 +68,13 @@ export default function DocumentsView() {
   const [sortBy, setSortBy] = useState<'date-desc' | 'date-asc' | 'title-asc' | 'title-desc' | 'size-desc'>('date-desc');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [isDragging, setIsDragging] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 12;
+
+  // Reset pagination when filter parameters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeCategoryFilter, activeFileTypeFilter, activeStatusFilter, searchQuery, sortBy]);
 
   // Upload Management
   const [uploadQueue, setUploadQueue] = useState<UploadProgressItem[]>([]);
@@ -873,6 +881,7 @@ export default function DocumentsView() {
       }
 
       supabaseSim.deleteDocument(id, activeOrg.id);
+      invalidateRetrievalCache();
       setDocuments(prev => prev.filter(doc => doc.id !== id));
       if (previewDoc?.id === id) {
         setPreviewDoc(null);
@@ -1126,6 +1135,10 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
         return 0;
     }
   });
+
+  // Paginated documents for display
+  const paginatedDocs = sortedDocs.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const totalPages = Math.ceil(sortedDocs.length / itemsPerPage) || 1;
 
   // Unique types from organization documents for filter dropdown
   const fileTypesList = ['All', ...Array.from(new Set(documents.map(d => d.file_type)))];
@@ -1486,7 +1499,7 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
               id="knowledge-grid"
             >
               <AnimatePresence mode="popLayout">
-                {sortedDocs.map((doc) => (
+                {paginatedDocs.map((doc) => (
                   <motion.div
                     layout
                     key={doc.id}
@@ -1623,7 +1636,7 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
                   </thead>
                   <tbody className="divide-y divide-white/5 text-slate-300">
                     <AnimatePresence mode="popLayout">
-                      {sortedDocs.map((doc) => (
+                      {paginatedDocs.map((doc) => (
                         <motion.tr
                           layout
                           key={doc.id}
@@ -1713,6 +1726,51 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
                     </AnimatePresence>
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Pagination Controls (Requirement 5) */}
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-white/5 pt-5 mt-4 text-xs font-mono">
+              <div className="text-slate-400">
+                Showing <span className="text-white font-semibold">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
+                <span className="text-white font-semibold">
+                  {Math.min(currentPage * itemsPerPage, sortedDocs.length)}
+                </span> of{' '}
+                <span className="text-white font-semibold">{sortedDocs.length}</span> assets
+              </div>
+              
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1.5 rounded bg-slate-900 border border-white/5 text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  Prev
+                </button>
+                
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => (
+                  <button
+                    key={pageNum}
+                    onClick={() => setCurrentPage(pageNum)}
+                    className={`w-7 h-7 rounded flex items-center justify-center font-bold border transition-all cursor-pointer ${
+                      currentPage === pageNum
+                        ? 'bg-[#00E5FF]/10 text-[#00E5FF] border-[#00E5FF]/30 shadow-lg shadow-[#00E5FF]/5'
+                        : 'bg-slate-950/40 text-slate-400 border-white/5 hover:text-white hover:border-white/10'
+                    }`}
+                  >
+                    {pageNum}
+                  </button>
+                ))}
+                
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1.5 rounded bg-slate-900 border border-white/5 text-slate-400 hover:text-white disabled:opacity-30 disabled:pointer-events-none transition-colors cursor-pointer"
+                >
+                  Next
+                </button>
               </div>
             </div>
           )}
@@ -2392,3 +2450,5 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
     </div>
   );
 }
+
+export default React.memo(DocumentsView);

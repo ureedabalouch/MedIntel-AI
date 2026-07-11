@@ -30,7 +30,7 @@ interface SearchResult {
   chunk_index: number;
 }
 
-export default function MedicalSearchView() {
+function MedicalSearchView() {
   const [query, setQuery] = useState('');
   const [similarityThreshold, setSimilarityThreshold] = useState(82);
   const [anatomyWeight, setAnatomyWeight] = useState(70);
@@ -373,3 +373,5 @@ export default function MedicalSearchView() {
     </div>
   );
 }
+
+export default React.memo(MedicalSearchView);

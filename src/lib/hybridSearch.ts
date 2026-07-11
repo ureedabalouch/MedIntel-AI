@@ -2,6 +2,7 @@ import { getSupabaseClient, isSupabaseConfigured } from './supabase';
 import { supabaseSim } from './supabaseSim';
 import { GoogleGenAI } from '@google/genai';
 import { RetrievalResult, SearchOptions } from './documentRetrieval';
+import { getCachedQueryEmbedding, setCachedQueryEmbedding, getCachedHybridSearch, setCachedHybridSearch } from './retrievalCache';
 
 export interface HybridSearchOptions extends SearchOptions {
   semanticWeight?: number; // default: 0.7
@@ -112,6 +113,12 @@ function calculateLexicalOverlap(query: string, content: string): number {
  * Generates an embedding for a search query using the Gemini API.
  */
 async function generateQueryEmbedding(query: string): Promise<number[] | null> {
+  const cached = getCachedQueryEmbedding(query);
+  if (cached) {
+    console.log('[HybridSearch] Reusing cached query embedding for:', query);
+    return cached;
+  }
+
   const ai = getGenAIClient();
   if (!ai) return null;
   
@@ -124,6 +131,7 @@ async function generateQueryEmbedding(query: string): Promise<number[] | null> {
     const res = response as any;
     const values = res.embedding?.values || res.embeddings?.values || res.embeddings?.[0]?.values || res.embedding?.[0]?.values;
     if (values && Array.isArray(values) && values.length > 0) {
+      setCachedQueryEmbedding(query, values);
       return values;
     }
     return null;
@@ -159,6 +167,12 @@ export async function searchHybridChunks(
   if (!organizationId) {
     console.warn('[HybridSearch] Aborting search: missing organizationId constraint.');
     return [];
+  }
+
+  // Check cache (Requirement 2)
+  const cachedResult = getCachedHybridSearch(query, options);
+  if (cachedResult) {
+    return cachedResult;
   }
   
   const supabase = getSupabaseClient();
@@ -261,6 +275,7 @@ export async function searchHybridChunks(
       
       // Sort descending by combined hybrid score
       fusedResults.sort((a, b) => b.similarity - a.similarity);
+      setCachedHybridSearch(query, options, fusedResults);
       return fusedResults;
       
     } catch (err) {
@@ -353,6 +368,7 @@ export async function searchHybridChunks(
     
     fusedResults.sort((a, b) => b.similarity - a.similarity);
     console.log(`[HybridSearch] [Simulator] Returning ${fusedResults.length} hybrid-fused chunks.`);
+    setCachedHybridSearch(query, options, fusedResults);
     return fusedResults;
     
   } catch (err) {
