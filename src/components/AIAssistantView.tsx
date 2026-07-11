@@ -23,6 +23,7 @@ import { searchSemanticChunks, RetrievalResult } from '../lib/documentRetrieval'
 import { rerankChunks } from '../lib/documentReranker';
 import { searchHybridChunks } from '../lib/hybridSearch';
 import { GoogleGenAI } from '@google/genai';
+import { metricsService } from '../lib/metricsService';
 
 interface Citation {
   document_id: string;
@@ -361,6 +362,7 @@ ${text}`;
 
       const endTime = performance.now();
       const latencyStr = `${Math.round(endTime - startTime)}ms`;
+      metricsService.recordAIResponse(endTime - startTime, true);
 
       const aiMsg: Message = {
         id: `ai-${Date.now()}`,
@@ -375,8 +377,9 @@ ${text}`;
       setMessages((prev) => [...prev, aiMsg]);
       setActiveReasoningId(aiMsg.id); // Expand clinical reasoning breakdown
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('[AIAssistantView] Critical error in RAG reasoning loop:', err);
+      metricsService.recordAIResponse(performance.now() - startTime, false, err?.message || 'Critical error in RAG reasoning loop');
       // Graceful error response, no UI crashes!
       const aiMsg: Message = {
         id: `ai-err-${Date.now()}`,

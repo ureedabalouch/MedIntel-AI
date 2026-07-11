@@ -1,5 +1,6 @@
 import { RetrievalResult } from './documentRetrieval';
 import { getCachedRerank, setCachedRerank } from './retrievalCache';
+import { metricsService } from './metricsService';
 
 /**
  * Reranking options parameterizing weights and tuning criteria.
@@ -101,11 +102,16 @@ export function rerankChunks(
     return [];
   }
 
+  const rerankStartTime = Date.now();
+
   // Check cache (Requirement 2)
   const cached = getCachedRerank(query, chunks, options);
   if (cached) {
+    metricsService.recordCacheHit();
+    metricsService.recordRerank(Date.now() - rerankStartTime, true);
     return cached;
   }
+  metricsService.recordCacheMiss();
   
   console.log(`[DocumentReranker] Reranking ${chunks.length} chunks for query: "${query}"`);
   
@@ -150,5 +156,6 @@ export function rerankChunks(
     .slice(0, topK);
 
   setCachedRerank(query, chunks, options, results);
+  metricsService.recordRerank(Date.now() - rerankStartTime, true);
   return results;
 }

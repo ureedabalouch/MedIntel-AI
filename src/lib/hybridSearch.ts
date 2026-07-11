@@ -3,6 +3,7 @@ import { supabaseSim } from './supabaseSim';
 import { GoogleGenAI } from '@google/genai';
 import { RetrievalResult, SearchOptions } from './documentRetrieval';
 import { getCachedQueryEmbedding, setCachedQueryEmbedding, getCachedHybridSearch, setCachedHybridSearch } from './retrievalCache';
+import { metricsService } from './metricsService';
 
 export interface HybridSearchOptions extends SearchOptions {
   semanticWeight?: number; // default: 0.7
@@ -169,11 +170,16 @@ export async function searchHybridChunks(
     return [];
   }
 
+  const searchStartTime = Date.now();
+
   // Check cache (Requirement 2)
   const cachedResult = getCachedHybridSearch(query, options);
   if (cachedResult) {
+    metricsService.recordCacheHit();
+    metricsService.recordRetrieval('hybrid', Date.now() - searchStartTime, true);
     return cachedResult;
   }
+  metricsService.recordCacheMiss();
   
   const supabase = getSupabaseClient();
   const ai = getGenAIClient();
@@ -276,6 +282,7 @@ export async function searchHybridChunks(
       // Sort descending by combined hybrid score
       fusedResults.sort((a, b) => b.similarity - a.similarity);
       setCachedHybridSearch(query, options, fusedResults);
+      metricsService.recordRetrieval('hybrid', Date.now() - searchStartTime, true);
       return fusedResults;
       
     } catch (err) {
@@ -369,10 +376,12 @@ export async function searchHybridChunks(
     fusedResults.sort((a, b) => b.similarity - a.similarity);
     console.log(`[HybridSearch] [Simulator] Returning ${fusedResults.length} hybrid-fused chunks.`);
     setCachedHybridSearch(query, options, fusedResults);
+    metricsService.recordRetrieval('hybrid', Date.now() - searchStartTime, true);
     return fusedResults;
     
   } catch (err) {
     console.error('[HybridSearch] Simulator failure:', err);
+    metricsService.recordRetrieval('hybrid', Date.now() - searchStartTime, false);
     return [];
   }
 }

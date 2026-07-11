@@ -3,6 +3,7 @@ import { supabaseSim } from './supabaseSim';
 import * as pdfjsLib from 'pdfjs-dist';
 import { GoogleGenAI } from '@google/genai';
 import { invalidateRetrievalCache } from './retrievalCache';
+import { metricsService } from './metricsService';
 
 // Configure pdfjs worker source using CDN to make it extremely reliable in browser contexts
 // Using @ts-ignore in case there are missing type definitions for the worker properties
@@ -1007,6 +1008,22 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
       stageDiagnostic.duration_ms = duration;
       stageDiagnostic.status = 'success';
       
+      let mappedStage: 'Validation' | 'Text Extraction' | 'Chunking' | 'Embedding Generation' | 'Vector Storage' | 'Semantic Retrieval' | 'Hybrid Search' | 'Reranking' | 'Gemini Generation' | undefined = undefined;
+      if (metricKey === 'extraction') mappedStage = 'Text Extraction';
+      else if (metricKey === 'chunking') mappedStage = 'Chunking';
+      else if (metricKey === 'embedding') mappedStage = 'Embedding Generation';
+      else if (metricKey === 'storage') mappedStage = 'Vector Storage';
+
+      if (mappedStage) {
+        metricsService.addPipelineEvent({
+          id: `pe-${Math.random().toString(36).substring(2, 11)}`,
+          stageName: mappedStage,
+          timestamp: new Date().toISOString(),
+          durationMs: duration,
+          success: true
+        });
+      }
+
       if (metricKey) {
         if (metricKey === 'extraction') metrics.extraction_duration_ms = duration;
         else if (metricKey === 'chunking') metrics.chunking_duration_ms = duration;
@@ -1024,6 +1041,29 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
       stageDiagnostic.status = 'failed';
       stageDiagnostic.error_message = err?.message || 'Unknown error';
       
+      let mappedStage: 'Validation' | 'Text Extraction' | 'Chunking' | 'Embedding Generation' | 'Vector Storage' | 'Semantic Retrieval' | 'Hybrid Search' | 'Reranking' | 'Gemini Generation' | undefined = undefined;
+      if (metricKey === 'extraction') mappedStage = 'Text Extraction';
+      else if (metricKey === 'chunking') mappedStage = 'Chunking';
+      else if (metricKey === 'embedding') mappedStage = 'Embedding Generation';
+      else if (metricKey === 'storage') mappedStage = 'Vector Storage';
+
+      if (mappedStage) {
+        metricsService.addPipelineEvent({
+          id: `pe-${Math.random().toString(36).substring(2, 11)}`,
+          stageName: mappedStage,
+          timestamp: new Date().toISOString(),
+          durationMs: duration,
+          success: false,
+          errorMessage: err?.message || 'Unknown error'
+        });
+        metricsService.recordError(
+          mappedStage,
+          'StageFailure',
+          err?.message || 'Stage execution failed',
+          documentId
+        );
+      }
+
       throw err;
     }
   };
