@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import {
   Search,
@@ -13,8 +13,13 @@ import {
   TrendingUp,
   Award
 } from 'lucide-react';
+import { supabaseSim } from '../lib/supabaseSim';
+import { getSupabaseClient } from '../lib/supabase';
+import { searchHybridChunks } from '../lib/hybridSearch';
+import { rerankChunks } from '../lib/documentReranker';
 
 interface SearchResult {
+  id: string;
   title: string;
   source: string;
   authors: string;
@@ -22,56 +27,131 @@ interface SearchResult {
   similarity: number;
   snippet: string;
   tags: string[];
+  chunk_index: number;
 }
 
 export default function MedicalSearchView() {
   const [query, setQuery] = useState('');
   const [similarityThreshold, setSimilarityThreshold] = useState(82);
   const [anatomyWeight, setAnatomyWeight] = useState(70);
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [allResults, setAllResults] = useState<SearchResult[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [docMap, setDocMap] = useState<Record<string, string>>({});
 
-  const mockArticles: SearchResult[] = [
-    {
-      title: 'Anticoagulant Outcomes in Moderate-to-Severe Chronic Kidney Disease',
-      source: 'The Lancet Oncology & Cardiology Quarterly',
-      authors: 'Lin S., Henderson P., Vance R.',
-      date: 'March 2025',
-      similarity: 94.2,
-      snippet: 'Comparing Apixaban (Eliquis) to standard Warfarin parameters in individuals with estimated GFR levels of 15 to 30 mL/min. Patient audits indicate a 34% drop in minor intracranial bleeding when adjusted for pharmacogenetic hepatic metabolisms.',
-      tags: ['Nephrology', 'Anticoagulants', 'GFR']
-    },
-    {
-      title: 'Renal Clearance of Factor Xa Inhibitors and Atrial Fibrillation Management',
-      source: 'American Journal of Medicine and Hematology',
-      authors: 'Rodriguez J., Miller K.',
-      date: 'December 2024',
-      similarity: 88.7,
-      snippet: 'Evaluating safety levels of low-dosage Rivaroxaban and Apixaban. Renal excretion rates of Factor Xa inhibitors are closely monitored. Findings validate clinical reliance on Hepatic CYP3A4 bypass pathways in patients showing elevated Creatinine.',
-      tags: ['Pharmacology', 'Cardiology', 'Renal Excretion']
-    },
-    {
-      title: 'Calciphylaxis Hazards Associated with Vitamin K Antagonists (Warfarin)',
-      source: 'Global Renal Disease Archives',
-      authors: 'Chen Y., Tanaka M.',
-      date: 'September 2024',
-      similarity: 83.1,
-      snippet: 'Chronic oral anticoagulant treatments with Coumadin block Gla proteins, leading to accelerated systemic vascular calcifications in end-stage chronic kidney disease, triggering calciphylaxis in patients with diabetic comorbidities.',
-      tags: ['Calciphylaxis', 'Coumadin', 'Dialysis']
-    }
-  ];
+  const session = supabaseSim.getSession();
+  const activeOrg = session?.activeOrg;
 
-  const handleSearch = (e: React.FormEvent) => {
+  // Load documents list to translate document_id into user-friendly filenames/titles
+  useEffect(() => {
+    if (!activeOrg) return;
+    
+    const loadDocs = async () => {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('organization_id', activeOrg.id);
+          if (!error && data) {
+            setDocuments(data);
+            const mapping: Record<string, string> = {};
+            data.forEach((d: any) => {
+              mapping[d.id] = d.title;
+            });
+            setDocMap(mapping);
+            return;
+          }
+        } catch (err) {
+          console.warn('[MedicalSearchView] Failed to load documents from real database, using simulator fallback', err);
+        }
+      }
+      
+      const simDocs = supabaseSim.getDocuments(activeOrg.id);
+      setDocuments(simDocs);
+      const mapping: Record<string, string> = {};
+      simDocs.forEach((d: any) => {
+        mapping[d.id] = d.title;
+      });
+      setDocMap(mapping);
+    };
+    
+    loadDocs();
+  }, [activeOrg]);
+
+  const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    setHasSearched(true);
-    if (!query.trim()) {
-      setResults([]);
+    if (!query.trim() || !activeOrg) {
+      setAllResults([]);
+      setHasSearched(true);
       return;
     }
-    // Filter results based on similarity threshold
-    const filtered = mockArticles.filter((item) => item.similarity >= similarityThreshold);
-    setResults(filtered);
+
+    setIsLoading(true);
+    setHasSearched(true);
+
+    try {
+      // Dynamically calculate hybrid search weights based on Anatomy Bias Weight slider
+      // FTS (lexical) weight increases with anatomy bias, while semantic weight scales down
+      const ftsWeight = anatomyWeight / 100;
+      const semanticWeight = 1.0 - ftsWeight;
+
+      // 1. Call searchHybridChunks to get top 20 matches from pgvector and PostgreSQL FTS
+      const retrieved = await searchHybridChunks(query, {
+        organizationId: activeOrg.id,
+        matchCount: 20,
+        semanticWeight,
+        ftsWeight
+      });
+
+      // Dynamically calculate reranker weights based on Anatomy Bias Weight slider
+      const keywordWeight = (anatomyWeight / 100) * 0.50;
+      const semanticRerankWeight = 0.80 - keywordWeight;
+
+      // 2. Pass those candidates through the documentReranker service
+      const reranked = rerankChunks(retrieved, {
+        query: query,
+        topK: 5,
+        semanticWeight: semanticRerankWeight,
+        keywordWeight: keywordWeight,
+        lengthWeight: 0.10,
+        metadataWeight: 0.10
+      });
+
+      // 3. Map retrieved/reranked chunks to SearchResult structure
+      const mappedResults: SearchResult[] = reranked.map((c) => {
+        const docTitle = docMap[c.document_id] || c.document_id || 'Institutional Record';
+        const source = c.metadata?.source || c.metadata?.category || 'Clinical Guidelines';
+        const authors = c.metadata?.uploaded_by || c.metadata?.author || 'Medical Staff';
+        const date = c.metadata?.date || 'Recently Updated';
+        const tags = c.metadata?.tags || ['Clinical', 'RAG'];
+
+        return {
+          id: `${c.document_id}-${c.chunk_index}`,
+          title: docTitle,
+          source: source,
+          authors: authors,
+          date: date,
+          similarity: parseFloat((c.similarity * 100).toFixed(1)),
+          snippet: c.content,
+          tags: tags,
+          chunk_index: c.chunk_index
+        };
+      });
+
+      setAllResults(mappedResults);
+    } catch (err) {
+      console.error('[MedicalSearchView] Error during hybrid vector scan:', err);
+      setAllResults([]);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  // Filter results dynamically by the similarityThreshold slider for an instant responsive UI
+  const displayedResults = allResults.filter((item) => item.similarity >= similarityThreshold);
 
   return (
     <div className="flex flex-col gap-8 relative z-10" id="medical-search-root">
@@ -107,14 +187,16 @@ export default function MedicalSearchView() {
                   placeholder="Query medical databases (e.g. renal stroke anticoagulant safety limits)..."
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900 border border-white/10 hover:border-white/20 focus:border-[#00E5FF] focus:outline-none text-white text-xs sm:text-sm font-mono placeholder:text-slate-500"
+                  disabled={isLoading}
+                  className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900 border border-white/10 hover:border-white/20 focus:border-[#00E5FF] focus:outline-none text-white text-xs sm:text-sm font-mono placeholder:text-slate-500 disabled:opacity-50"
                 />
               </div>
               <button
                 type="submit"
-                className="px-6 py-3 rounded-xl bg-[#00E5FF] hover:bg-[#00E5FF]/90 text-slate-950 font-display font-bold text-xs sm:text-sm transition-all cursor-pointer whitespace-nowrap"
+                disabled={isLoading}
+                className="px-6 py-3 rounded-xl bg-[#00E5FF] hover:bg-[#00E5FF]/90 text-slate-950 font-display font-bold text-xs sm:text-sm transition-all cursor-pointer whitespace-nowrap disabled:opacity-50"
               >
-                Scan Vectors
+                {isLoading ? 'Scanning...' : 'Scan Vectors'}
               </button>
             </form>
 
@@ -131,11 +213,21 @@ export default function MedicalSearchView() {
           {hasSearched ? (
             <div className="flex flex-col gap-4">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-mono text-slate-400 uppercase">Matches Found: {results.length}</span>
+                <span className="text-xs font-mono text-slate-400 uppercase">Matches Found: {displayedResults.length}</span>
                 <span className="text-[10px] font-mono text-slate-500">THRESHOLD FILTER ACTIVE</span>
               </div>
 
-              {results.length === 0 ? (
+              {isLoading ? (
+                <div className="glass-panel p-12 text-center rounded-2xl flex flex-col items-center justify-center gap-3">
+                  <div className="p-3.5 rounded-full bg-slate-950/40 text-[#00E5FF] border border-[#00E5FF]/10 animate-spin">
+                    <Sliders size={28} />
+                  </div>
+                  <h4 className="font-display font-bold text-sm text-slate-300">Searching and Reranking Private Indices...</h4>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                    Computing cosine similarities and lexical weights across patient datasets.
+                  </p>
+                </div>
+              ) : displayedResults.length === 0 ? (
                 <div className="glass-panel p-12 text-center rounded-2xl flex flex-col items-center justify-center gap-3">
                   <div className="p-3.5 rounded-full bg-slate-950/40 text-slate-600 border border-white/5">
                     <Sliders size={28} />
@@ -146,9 +238,9 @@ export default function MedicalSearchView() {
                   </p>
                 </div>
               ) : (
-                results.map((item, idx) => (
+                displayedResults.map((item, idx) => (
                   <motion.div
-                    key={idx}
+                    key={item.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: idx * 0.05 }}
@@ -162,12 +254,14 @@ export default function MedicalSearchView() {
                         <h4 className="font-display font-bold text-base text-white mt-2 group-hover:text-[#00E5FF] transition-colors leading-snug">
                           {item.title}
                         </h4>
-                        <span className="text-xs text-slate-400 font-mono mt-1 block">Authors: {item.authors} • Published {item.date}</span>
+                        <span className="text-xs text-slate-400 font-mono mt-1 block">
+                          Chunk #{item.chunk_index} • Authors: {item.authors} • Published {item.date}
+                        </span>
                       </div>
 
                       <div className="flex flex-col items-end gap-1 text-right shrink-0">
                         <span className="text-[#14F195] font-mono font-bold text-sm">{item.similarity}%</span>
-                        <span className="text-[9px] font-mono text-slate-500 uppercase">Cosine Match</span>
+                        <span className="text-[9px] font-mono text-slate-500 uppercase">Hybrid Rerank Match</span>
                       </div>
                     </div>
 
