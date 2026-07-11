@@ -653,14 +653,151 @@ export async function processDocument(documentId: string): Promise<boolean> {
  * @param orgId The organization context ID for RLS scoping.
  * @returns A promise resolving to a boolean indicating overall success.
  */
+export interface StageDiagnostic {
+  stage_name: string;
+  start_time: string;
+  end_time?: string;
+  duration_ms?: number;
+  status: 'success' | 'failed' | 'running';
+  error_message?: string;
+}
+
+export interface IngestionMetrics {
+  document_id: string;
+  organization_id: string;
+  job_id: string;
+  total_duration_ms: number;
+  extraction_duration_ms?: number;
+  chunking_duration_ms?: number;
+  embedding_duration_ms?: number;
+  storage_duration_ms?: number;
+  diagnostics: StageDiagnostic[];
+  created_at: string;
+}
+
+interface LogPayload {
+  document_id: string;
+  organization_id: string;
+  stage: string;
+  timestamp: string;
+  retry_count: number;
+  status: 'started' | 'success' | 'retry' | 'failed' | 'completed' | 'skipped';
+  message?: string;
+  duration_ms?: number;
+  error?: string;
+}
+
+function logDiagnostic(payload: LogPayload) {
+  console.log(`[PIPELINE_LOG] ${JSON.stringify(payload)}`);
+}
+
+export function saveIngestionMetrics(metrics: IngestionMetrics) {
+  try {
+    const existingStr = localStorage.getItem('rag_ingestion_metrics');
+    const existing: IngestionMetrics[] = existingStr ? JSON.parse(existingStr) : [];
+    // Keep it unique per document ID, keeping newest run at the top
+    const updated = [metrics, ...existing.filter(m => m.document_id !== metrics.document_id)].slice(0, 100);
+    localStorage.setItem('rag_ingestion_metrics', JSON.stringify(updated));
+  } catch (err) {
+    console.warn('[DocumentProcessor] Failed to save ingestion metrics to localStorage:', err);
+  }
+}
+
+export function getIngestionMetrics(): IngestionMetrics[] {
+  try {
+    const existingStr = localStorage.getItem('rag_ingestion_metrics');
+    return existingStr ? JSON.parse(existingStr) : [];
+  } catch (err) {
+    console.warn('[DocumentProcessor] Failed to get ingestion metrics from localStorage:', err);
+    return [];
+  }
+}
+
+async function executeWithRetry<T>(
+  fn: () => Promise<T>,
+  stage: string,
+  docId: string,
+  orgId: string,
+  shouldRetry: (err: any) => boolean = () => true
+): Promise<T> {
+  let attempt = 0;
+  const maxRetries = 3;
+  const baseDelay = 1000; // 1 second base
+  
+  while (true) {
+    const startTime = Date.now();
+    try {
+      logDiagnostic({
+        document_id: docId,
+        organization_id: orgId,
+        stage,
+        timestamp: new Date().toISOString(),
+        retry_count: attempt,
+        status: attempt === 0 ? 'started' : 'retry',
+        message: `Executing stage '${stage}' (attempt ${attempt + 1}/${maxRetries + 1})`
+      });
+      
+      const result = await fn();
+      
+      logDiagnostic({
+        document_id: docId,
+        organization_id: orgId,
+        stage,
+        timestamp: new Date().toISOString(),
+        retry_count: attempt,
+        status: 'success',
+        message: `Stage '${stage}' completed successfully`,
+        duration_ms: Date.now() - startTime
+      });
+      
+      return result;
+    } catch (err: any) {
+      const duration = Date.now() - startTime;
+      attempt++;
+      
+      logDiagnostic({
+        document_id: docId,
+        organization_id: orgId,
+        stage,
+        timestamp: new Date().toISOString(),
+        retry_count: attempt - 1,
+        status: 'failed',
+        message: `Stage '${stage}' failed: ${err?.message || 'Unknown error'}`,
+        duration_ms: duration,
+        error: err?.message || 'Unknown error'
+      });
+      
+      if (attempt > maxRetries || !shouldRetry(err)) {
+        throw err;
+      }
+      
+      const backoffDelay = baseDelay * Math.pow(2, attempt - 1);
+      console.log(`[DocumentProcessor] Retry block: Stage '${stage}' failed. Backing off for ${backoffDelay}ms before retry...`);
+      await new Promise(resolve => setTimeout(resolve, backoffDelay));
+    }
+  }
+}
+
 export async function orchestrateAndTrackDocumentProcessing(documentId: string, orgId: string): Promise<boolean> {
   console.log(`[DocumentProcessor] Initiating Automated End-to-End processing for document: ${documentId}`);
   
+  const pipelineStartTime = new Date();
   const supabase = getSupabaseClient();
   const isReal = isSupabaseConfigured() && supabase !== null;
   
   let jobId = `job-${Math.random().toString(36).substring(2, 11)}`;
   
+  // Create structured diagnostics list & metrics object
+  const diagnosticsList: StageDiagnostic[] = [];
+  const metrics: IngestionMetrics = {
+    document_id: documentId,
+    organization_id: orgId,
+    job_id: jobId,
+    total_duration_ms: 0,
+    diagnostics: diagnosticsList,
+    created_at: new Date().toISOString()
+  };
+
   // 1. Create processing_jobs record with status 'queued' if it doesn't exist
   if (isReal && supabase) {
     try {
@@ -673,6 +810,7 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
         
       if (existingJob) {
         jobId = existingJob.id;
+        metrics.job_id = jobId;
         // Update existing job to queued
         await supabase
           .from('processing_jobs')
@@ -680,6 +818,10 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
             status: 'queued',
             progress_percentage: 0,
             current_step: 'Queued for processing',
+            started_at: null,
+            completed_at: null,
+            processing_time_ms: null,
+            error_message: null,
             updated_at: new Date().toISOString()
           })
           .eq('id', jobId);
@@ -702,6 +844,7 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
           
         if (!insertErr && newJob) {
           jobId = newJob.id;
+          metrics.job_id = jobId;
         }
       }
     } catch (err) {
@@ -713,10 +856,15 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
     const existing = existingJobs.find((j: any) => j.document_id === documentId);
     if (existing) {
       jobId = existing.id;
+      metrics.job_id = jobId;
       supabaseSim.updateProcessingJob(jobId, {
         status: 'queued',
         progress_percentage: 0,
-        current_step: 'Queued for processing'
+        current_step: 'Queued for processing',
+        started_at: null,
+        completed_at: null,
+        processing_time_ms: null,
+        error_message: null
       });
     } else {
       const added = supabaseSim.addProcessingJob({
@@ -728,19 +876,31 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
         progress_percentage: 0,
         current_step: 'Queued for processing'
       });
-      if (added) jobId = added.id;
+      if (added) {
+        jobId = added.id;
+        metrics.job_id = jobId;
+      }
     }
   }
 
-  // Define helper function to update progress
+  // Progress update helper
   const updateProgress = async (progress: number, step: string, status: string = 'running', errorMsg: string | null = null) => {
+    const totalDuration = Date.now() - pipelineStartTime.getTime();
     console.log(`[DocumentProcessor] Job ID ${jobId}: Progress ${progress}%, Step: ${step}, Status: ${status}`);
+    
     const updates: any = {
       status,
       progress_percentage: progress,
       current_step: step,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      processing_time_ms: totalDuration,
+      metrics,
+      diagnostics: diagnosticsList
     };
+    
+    if (status === 'running' && progress === 5) {
+      updates.started_at = pipelineStartTime.toISOString();
+    }
     if (status === 'completed') {
       updates.completed_at = new Date().toISOString();
     }
@@ -750,9 +910,20 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
 
     if (isReal && supabase) {
       try {
+        const dbUpdates: any = {
+          status: updates.status,
+          progress_percentage: updates.progress_percentage,
+          current_step: updates.current_step,
+          updated_at: updates.updated_at,
+          processing_time_ms: updates.processing_time_ms
+        };
+        if (updates.started_at) dbUpdates.started_at = updates.started_at;
+        if (updates.completed_at) dbUpdates.completed_at = updates.completed_at;
+        if (updates.error_message) dbUpdates.error_message = updates.error_message;
+        
         await supabase
           .from('processing_jobs')
-          .update(updates)
+          .update(dbUpdates)
           .eq('id', jobId);
       } catch (err) {
         console.warn('[DocumentProcessor] Failed to update real processing job status:', err);
@@ -762,45 +933,165 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
     }
   };
 
+  // Run stage helper with automatic diagnostics/duration metrics
+  const runStageWithMetrics = async <T>(
+    stageName: string,
+    metricKey: 'extraction' | 'chunking' | 'embedding' | 'storage' | null,
+    fn: () => Promise<T>
+  ): Promise<T> => {
+    const stageStart = new Date();
+    const stageDiagnostic: StageDiagnostic = {
+      stage_name: stageName,
+      start_time: stageStart.toISOString(),
+      status: 'running'
+    };
+    diagnosticsList.push(stageDiagnostic);
+
+    try {
+      const res = await fn();
+      const stageEnd = new Date();
+      const duration = stageEnd.getTime() - stageStart.getTime();
+      
+      stageDiagnostic.end_time = stageEnd.toISOString();
+      stageDiagnostic.duration_ms = duration;
+      stageDiagnostic.status = 'success';
+      
+      if (metricKey) {
+        if (metricKey === 'extraction') metrics.extraction_duration_ms = duration;
+        else if (metricKey === 'chunking') metrics.chunking_duration_ms = duration;
+        else if (metricKey === 'embedding') metrics.embedding_duration_ms = duration;
+        else if (metricKey === 'storage') metrics.storage_duration_ms = duration;
+      }
+      
+      return res;
+    } catch (err: any) {
+      const stageEnd = new Date();
+      const duration = stageEnd.getTime() - stageStart.getTime();
+      
+      stageDiagnostic.end_time = stageEnd.toISOString();
+      stageDiagnostic.duration_ms = duration;
+      stageDiagnostic.status = 'failed';
+      stageDiagnostic.error_message = err?.message || 'Unknown error';
+      
+      throw err;
+    }
+  };
+
   try {
-    // Immediately transition it to "running" when processing begins (requirement 2)
+    // 3. Duplicate Protection
+    let isAlreadyIndexed = false;
+    if (isReal && supabase) {
+      try {
+        const { data: doc, error: docErr } = await supabase
+          .from('documents')
+          .select('status')
+          .eq('id', documentId)
+          .single();
+        if (!docErr && doc && doc.status === 'indexed') {
+          isAlreadyIndexed = true;
+        }
+      } catch (err) {
+        console.warn('[DocumentProcessor] Error checking if real doc is already indexed:', err);
+      }
+    } else {
+      const simState = supabaseSim.getRawState();
+      const simDoc = simState.documents.find((d: any) => d.id === documentId);
+      if (simDoc && simDoc.status === 'Ready') {
+        isAlreadyIndexed = true;
+      }
+    }
+
+    if (isAlreadyIndexed) {
+      logDiagnostic({
+        document_id: documentId,
+        organization_id: orgId,
+        stage: 'duplicate_protection',
+        timestamp: new Date().toISOString(),
+        retry_count: 0,
+        status: 'skipped',
+        message: 'Reprocessing skipped: Document is already indexed.'
+      });
+      await updateProgress(100, 'Skipped: Document already indexed.', 'completed');
+      return true;
+    }
+
+    // Immediately transition it to "running" when processing begins
     await updateProgress(5, 'Processing started...', 'running');
 
-    // Stage 1: validateDocument()
+    // Stage 1: validateDocument() [No Retry as per spec]
     await updateProgress(10, 'Validating document structure...', 'running');
-    const isValid = await validateDocument(documentId);
+    const isValid = await runStageWithMetrics('validate_document', null, async () => {
+      return await validateDocument(documentId);
+    });
     if (!isValid) {
       throw new Error('Document validation failed. Record not found in system databases.');
     }
     await updateProgress(20, 'Document validated.', 'running');
 
-    // Stage 2: extractText()
+    // Stage 2: extractText() [Retry up to 3 times with exponential backoff]
     await updateProgress(30, 'Extracting document text content...', 'running');
-    const rawText = await extractText(documentId);
-    
-    if (rawText === "Unsupported document type") {
-      throw new Error('Unsupported document type or failed text extraction.');
-    }
+    const rawText = await executeWithRetry(
+      async () => {
+        return await runStageWithMetrics('text_extraction', 'extraction', async () => {
+          const text = await extractText(documentId);
+          if (text === "Unsupported document type") {
+            const err = new Error("Unsupported document type");
+            (err as any).nonRetriable = true;
+            throw err;
+          }
+          return text;
+        });
+      },
+      'text_extraction',
+      documentId,
+      orgId,
+      (err) => !err.nonRetriable
+    );
     await updateProgress(50, `Text extraction complete (${rawText.length} characters).`, 'running');
 
-    // Stage 3: chunkDocument()
+    // Stage 3: chunkDocument() [No retry needed as it is purely CPU local]
     await updateProgress(60, 'Splitting text into coherent semantic chunks...', 'running');
-    const chunks = await chunkDocument(rawText);
+    const chunks = await runStageWithMetrics('text_chunking', 'chunking', async () => {
+      return await chunkDocument(rawText);
+    });
     await updateProgress(75, `Text chunked into ${chunks.length} semantic segments.`, 'running');
 
-    // Stage 4: generateEmbeddings()
+    // Stage 4: generateEmbeddings() [Retry up to 3 times with exponential backoff]
     await updateProgress(80, 'Generating vector embeddings using preview model...', 'running');
-    const embeddings = await generateEmbeddings(chunks);
+    const embeddings = await executeWithRetry(
+      async () => {
+        return await runStageWithMetrics('embedding_generation', 'embedding', async () => {
+          return await generateEmbeddings(chunks);
+        });
+      },
+      'embedding_generation',
+      documentId,
+      orgId
+    );
     await updateProgress(90, 'Embeddings generated successfully.', 'running');
 
-    // Stage 5: storeVectors()
+    // Stage 5: storeVectors() [Retry up to 3 times with exponential backoff]
     await updateProgress(95, 'Storing vectors and chunk metadata in organizational RLS tables...', 'running');
-    const storageSuccess = await storeVectors(documentId, chunks, embeddings);
-    if (!storageSuccess) {
-      throw new Error('Failed to store generated vectors in database.');
-    }
+    await executeWithRetry(
+      async () => {
+        return await runStageWithMetrics('vector_storage', 'storage', async () => {
+          const success = await storeVectors(documentId, chunks, embeddings);
+          if (!success) {
+            throw new Error('Failed to store generated vectors in database.');
+          }
+          return success;
+        });
+      },
+      'vector_storage',
+      documentId,
+      orgId
+    );
 
-    // 5. On successful completion (requirement 5)
+    // Save final metrics
+    metrics.total_duration_ms = Date.now() - pipelineStartTime.getTime();
+    saveIngestionMetrics(metrics);
+
+    // On successful completion
     await updateProgress(100, 'Document indexed and vectorized successfully.', 'completed');
     
     // Update documents.status = "indexed"
@@ -824,14 +1115,27 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
       }
     }
 
+    logDiagnostic({
+      document_id: documentId,
+      organization_id: orgId,
+      stage: 'orchestration',
+      timestamp: new Date().toISOString(),
+      retry_count: 0,
+      status: 'completed',
+      message: 'Document ingestion pipeline finished successfully.',
+      duration_ms: metrics.total_duration_ms
+    });
+
     console.log(`[DocumentProcessor] Complete automated processing pipeline succeeded for document: ${documentId}`);
     return true;
 
   } catch (err: any) {
-    // 6. On failure (requirement 6)
     const errorMsg = err?.message || 'Unknown processing error';
     console.error(`[DocumentProcessor] Pipeline error on document ${documentId}:`, errorMsg);
     
+    metrics.total_duration_ms = Date.now() - pipelineStartTime.getTime();
+    saveIngestionMetrics(metrics);
+
     await updateProgress(100, `Processing failed: ${errorMsg}`, 'failed', errorMsg);
 
     // Update documents.status = "failed"
@@ -854,6 +1158,18 @@ export async function orchestrateAndTrackDocumentProcessing(documentId: string, 
         console.warn('[DocumentProcessor] Failed to update simulated document status to Failed:', docErr);
       }
     }
+
+    logDiagnostic({
+      document_id: documentId,
+      organization_id: orgId,
+      stage: 'orchestration',
+      timestamp: new Date().toISOString(),
+      retry_count: 0,
+      status: 'failed',
+      message: `Document ingestion pipeline failed: ${errorMsg}`,
+      duration_ms: metrics.total_duration_ms,
+      error: errorMsg
+    });
 
     return false;
   }

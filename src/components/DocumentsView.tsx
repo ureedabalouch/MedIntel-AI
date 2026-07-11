@@ -37,7 +37,7 @@ import {
 import { DocumentItem, CustomCategory } from '../types';
 import { supabaseSim } from '../lib/supabaseSim';
 import { getSupabaseClient } from '../lib/supabase';
-import { orchestrateAndTrackDocumentProcessing } from '../lib/documentProcessor';
+import { orchestrateAndTrackDocumentProcessing, getIngestionMetrics } from '../lib/documentProcessor';
 
 interface UploadProgressItem {
   id: string;
@@ -1806,6 +1806,82 @@ For DICOM imagery slices or genomic profiles, access full RAG querying on the Me
                   </div>
 
                 </div>
+
+                {/* RAG Pipeline Telemetry section */}
+                {(() => {
+                  const allMetrics = getIngestionMetrics();
+                  const docMetrics = allMetrics.find(m => m.document_id === previewDoc.id);
+                  if (docMetrics) {
+                    return (
+                      <div className="flex flex-col gap-2 border-t border-white/5 pt-4">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">RAG Ingestion Metrics</span>
+                        <div className="bg-slate-950/60 rounded-xl p-3 border border-white/5 font-mono text-[10px] flex flex-col gap-2">
+                          <div className="flex justify-between border-b border-white/5 pb-1 text-slate-400">
+                            <span>Total Duration:</span>
+                            <span className="text-[#00E5FF] font-bold">{(docMetrics.total_duration_ms / 1000).toFixed(2)}s</span>
+                          </div>
+                          
+                          <div className="flex flex-col gap-1.5 text-[9px] text-slate-400">
+                            {docMetrics.extraction_duration_ms !== undefined && (
+                              <div className="flex justify-between">
+                                <span>⚡ Text Extraction:</span>
+                                <span className="text-slate-200">{docMetrics.extraction_duration_ms}ms</span>
+                              </div>
+                            )}
+                            {docMetrics.chunking_duration_ms !== undefined && (
+                              <div className="flex justify-between">
+                                <span>✂️ Text Chunking:</span>
+                                <span className="text-slate-200">{docMetrics.chunking_duration_ms}ms</span>
+                              </div>
+                            )}
+                            {docMetrics.embedding_duration_ms !== undefined && (
+                              <div className="flex justify-between">
+                                <span>🧠 Vector Embedding:</span>
+                                <span className="text-slate-200">{docMetrics.embedding_duration_ms}ms</span>
+                              </div>
+                            )}
+                            {docMetrics.storage_duration_ms !== undefined && (
+                              <div className="flex justify-between">
+                                <span>💾 Database Storage:</span>
+                                <span className="text-slate-200">{docMetrics.storage_duration_ms}ms</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {docMetrics.diagnostics && docMetrics.diagnostics.length > 0 && (
+                            <div className="border-t border-white/5 pt-1.5 mt-1">
+                              <span className="text-[8px] text-slate-500 uppercase tracking-wider block mb-1">Stage Diagnostics:</span>
+                              <div className="flex flex-col gap-1 max-h-[100px] overflow-y-auto pr-1">
+                                {docMetrics.diagnostics.map((diag, index) => (
+                                  <div key={index} className="flex items-center justify-between text-[8px] truncate">
+                                    <span className="text-slate-400 truncate max-w-[120px]" title={diag.stage_name}>
+                                      • {diag.stage_name.replace('_', ' ')}
+                                    </span>
+                                    <span className={
+                                      diag.status === 'success' ? 'text-[#14F195]' :
+                                      diag.status === 'failed' ? 'text-red-400' : 'text-amber-400 font-bold'
+                                    }>
+                                      {diag.status === 'success' ? `${diag.duration_ms}ms` : diag.status}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div className="flex flex-col gap-2 border-t border-white/5 pt-4">
+                        <span className="text-[10px] font-mono text-slate-500 uppercase tracking-widest font-bold">RAG Ingestion Metrics</span>
+                        <div className="bg-slate-950/40 rounded-xl p-3 border border-white/5 font-mono text-[9px] text-slate-500 text-center italic">
+                          Telemetry logs unavailable for pre-seeded medical assets.
+                        </div>
+                      </div>
+                    );
+                  }
+                })()}
 
                 <div className="mt-auto pt-4 border-t border-white/5">
                   <button
