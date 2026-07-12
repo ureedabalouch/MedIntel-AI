@@ -19,9 +19,10 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { metricsService, SystemMetrics, PipelineEvent, ErrorEvent } from '../lib/metricsService';
+import { SystemValidationView } from './SystemValidationView';
 
 function AnalyticsView() {
-  const [activeTab, setActiveTab] = useState<'performance' | 'health'>('health');
+  const [activeTab, setActiveTab] = useState<'performance' | 'health' | 'validation'>('health');
   const [activeChart, setActiveChart] = useState<'latency' | 'accuracy' | 'clusters'>('latency');
   
   // Real-time telemetry state
@@ -132,9 +133,21 @@ function AnalyticsView() {
             <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#14F195]" />
           )}
         </button>
+
+        <button
+          onClick={() => setActiveTab('validation')}
+          className={`pb-3 font-mono text-xs uppercase font-bold tracking-wider relative transition-colors cursor-pointer ${
+            activeTab === 'validation' ? 'text-[#7C3AED]' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          System Validation
+          {activeTab === 'validation' && (
+            <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#7C3AED]" />
+          )}
+        </button>
       </div>
 
-      {activeTab === 'health' ? (
+      {activeTab === 'health' && (
         <div className="flex flex-col gap-6" id="monitoring-health-view">
           
           {/* Quick Health KPI Grid */}
@@ -388,7 +401,9 @@ function AnalyticsView() {
           </div>
 
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'performance' && (
         <div className="flex flex-col gap-8" id="model-performance-view">
           
           {/* Quick metrics */}
@@ -606,6 +621,10 @@ function AnalyticsView() {
           </div>
 
         </div>
+      )}
+
+      {activeTab === 'validation' && (
+        <SystemValidationView />
       )}
 
     </div>
