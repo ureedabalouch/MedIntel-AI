@@ -310,13 +310,13 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute top-full left-0 mt-2 w-64 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 text-xs font-mono"
+                    className="absolute top-full left-0 mt-2 w-64 bg-[#0B1220] border border-[rgba(255,255,255,0.08)] rounded-[14px] overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.45)] z-[999] text-xs font-mono"
                   >
-                    <div className="p-3 bg-slate-950/80 border-b border-white/5 flex justify-between items-center">
-                      <span className="font-bold text-slate-400">SWITCH WORKSPACE</span>
+                    <div className="p-3 bg-[#0F1C30] border-b border-white/[0.05] flex justify-between items-center">
+                      <span className="font-bold text-[#94A3B8]">SWITCH WORKSPACE</span>
                       <span className="text-[9px] bg-[#00E5FF]/10 text-[#00E5FF] px-1.5 py-0.5 rounded font-bold">RLS FILTER</span>
                     </div>
-                    <div className="p-2 flex flex-col gap-1">
+                    <div className="p-2 flex flex-col gap-1 bg-[#0B1220]">
                       {userOrgs.map((o) => {
                         const isCurrent = session?.activeOrg?.id === o.id;
                         return (
@@ -358,10 +358,10 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                               window.dispatchEvent(event);
                             }}
                             className={`w-full text-left px-3 py-2.5 rounded-lg hover:bg-white/5 transition-all flex justify-between items-center ${
-                              isCurrent ? 'bg-[#00E5FF]/10 text-[#00E5FF]' : 'text-slate-300'
+                              isCurrent ? 'bg-[#00E5FF]/10 text-[#00E5FF]' : 'text-[#94A3B8] hover:text-[#F8FAFC]'
                             }`}
                           >
-                            <span className="truncate pr-2">{o.name}</span>
+                            <span className="truncate pr-2 font-medium">{o.name}</span>
                             {isCurrent && <span className="text-[8px] bg-[#00E5FF]/20 text-[#00E5FF] px-1.5 py-0.5 rounded font-bold">ACTIVE</span>}
                           </button>
                         );
@@ -471,21 +471,21 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 10 }}
-                    className="absolute right-0 mt-2 w-56 glass-panel border border-white/10 rounded-xl overflow-hidden shadow-2xl z-50 text-xs"
+                    className="absolute right-0 mt-2 w-60 bg-[#0B1220] border border-[rgba(255,255,255,0.08)] rounded-[14px] overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.45)] z-[999] text-xs"
                   >
-                    <div className="p-3 bg-slate-950/60 border-b border-white/5 font-mono">
-                      <span className="font-bold text-white block">{session?.profile?.full_name || 'Dr. Sarah Lin'}</span>
-                      <span className="text-[10px] text-slate-400 mt-0.5 block truncate">{session?.user?.email}</span>
+                    <div className="p-3 bg-[#0F1C30] border-b border-white/[0.05] font-mono">
+                      <span className="font-bold text-[#F8FAFC] block">{session?.profile?.full_name || 'Dr. Sarah Lin'}</span>
+                      <span className="text-[10px] text-[#94A3B8] mt-0.5 block truncate">{session?.user?.email}</span>
                     </div>
 
-                    <div className="p-2 flex flex-col gap-1 text-slate-300">
-                      <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
+                    <div className="p-2 flex flex-col gap-1 text-[#94A3B8] bg-[#0B1220]">
+                      <div className="px-3 py-2 hover:bg-white/5 hover:text-[#F8FAFC] rounded-lg cursor-pointer flex justify-between items-center transition-all">
                         <span>Active Role</span>
                         <span className="text-[10px] bg-[#00E5FF]/10 text-[#00E5FF] font-mono px-2 py-0.5 rounded uppercase font-bold">
                           {session?.profile?.role || 'Doctor'}
                         </span>
                       </div>
-                      <div className="px-3 py-2 hover:bg-white/5 rounded-lg cursor-pointer flex justify-between items-center">
+                      <div className="px-3 py-2 hover:bg-white/5 hover:text-[#F8FAFC] rounded-lg cursor-pointer flex justify-between items-center transition-all">
                         <span>Sandbox Encryption</span>
                         <span className="text-[10px] bg-[#14F195]/10 text-[#14F195] font-mono px-2 py-0.5 rounded uppercase font-bold">AES-256</span>
                       </div>
@@ -494,7 +494,7 @@ export default function AppLayout({ onExitPlatform }: AppLayoutProps) {
                           supabaseSim.signOut();
                           onExitPlatform();
                         }}
-                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 mt-1 cursor-pointer font-bold"
+                        className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-500/10 rounded-lg flex items-center gap-2 mt-1 cursor-pointer font-bold transition-all"
                       >
                         <LogOut size={12} />
                         <span>Logout Session</span>
