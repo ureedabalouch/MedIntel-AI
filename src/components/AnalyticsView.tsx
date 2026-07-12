@@ -20,9 +20,10 @@ import {
 } from 'lucide-react';
 import { metricsService, SystemMetrics, PipelineEvent, ErrorEvent } from '../lib/metricsService';
 import { SystemValidationView } from './SystemValidationView';
+import { ProductionReadinessView } from './ProductionReadinessView';
 
 function AnalyticsView() {
-  const [activeTab, setActiveTab] = useState<'performance' | 'health' | 'validation'>('health');
+  const [activeTab, setActiveTab] = useState<'performance' | 'health' | 'validation' | 'readiness'>('health');
   const [activeChart, setActiveChart] = useState<'latency' | 'accuracy' | 'clusters'>('latency');
   
   // Real-time telemetry state
@@ -143,6 +144,18 @@ function AnalyticsView() {
           System Validation
           {activeTab === 'validation' && (
             <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#7C3AED]" />
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('readiness')}
+          className={`pb-3 font-mono text-xs uppercase font-bold tracking-wider relative transition-colors cursor-pointer ${
+            activeTab === 'readiness' ? 'text-[#00E5FF]' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          Production Readiness
+          {activeTab === 'readiness' && (
+            <motion.div layoutId="activeTabUnderline" className="absolute bottom-0 left-0 right-0 h-0.5 bg-[#00E5FF]" />
           )}
         </button>
       </div>
@@ -625,6 +638,10 @@ function AnalyticsView() {
 
       {activeTab === 'validation' && (
         <SystemValidationView />
+      )}
+
+      {activeTab === 'readiness' && (
+        <ProductionReadinessView />
       )}
 
     </div>
