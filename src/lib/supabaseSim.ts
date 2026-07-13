@@ -264,8 +264,16 @@ class SupabaseSimulator {
         };
 
         let activeOrg: Organization | null = this.state.session?.activeOrg || null;
-        if (!activeOrg && this.state.organizations.length > 0) {
-          activeOrg = this.state.organizations[0];
+        const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+        if (activeOrg) {
+          const stillMember = userMemberships.some(m => m.organization_id === activeOrg?.id);
+          if (!stillMember) {
+            activeOrg = null;
+          }
+        }
+        if (!activeOrg && userMemberships.length > 0) {
+          const orgId = userMemberships[0].organization_id;
+          activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
         }
 
         this.state.session = {
@@ -301,8 +309,16 @@ class SupabaseSimulator {
         };
 
         let activeOrg: Organization | null = this.state.session?.activeOrg || null;
-        if (!activeOrg && this.state.organizations.length > 0) {
-          activeOrg = this.state.organizations[0];
+        const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+        if (activeOrg) {
+          const stillMember = userMemberships.some(m => m.organization_id === activeOrg?.id);
+          if (!stillMember) {
+            activeOrg = null;
+          }
+        }
+        if (!activeOrg && userMemberships.length > 0) {
+          const orgId = userMemberships[0].organization_id;
+          activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
         }
 
         this.state.session = {
@@ -672,10 +688,12 @@ class SupabaseSimulator {
         created_at: sbUser.created_at
       };
 
-      // Since organizations are mocked for now, find or create activeOrg context
-      let activeOrg: Organization | null = this.state.session?.activeOrg || null;
-      if (!activeOrg && this.state.organizations.length > 0) {
-        activeOrg = this.state.organizations[0];
+      // Since organizations are mocked for now, map activeOrg context securely
+      const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+      let activeOrg: Organization | null = null;
+      if (userMemberships.length > 0) {
+        const orgId = userMemberships[0].organization_id;
+        activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
       }
 
       this.state.session = {
@@ -724,8 +742,16 @@ class SupabaseSimulator {
         };
 
         let activeOrg: Organization | null = this.state.session?.activeOrg || null;
-        if (!activeOrg && this.state.organizations.length > 0) {
-          activeOrg = this.state.organizations[0];
+        const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+        if (activeOrg) {
+          const stillMember = userMemberships.some(m => m.organization_id === activeOrg?.id);
+          if (!stillMember) {
+            activeOrg = null;
+          }
+        }
+        if (!activeOrg && userMemberships.length > 0) {
+          const orgId = userMemberships[0].organization_id;
+          activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
         }
 
         this.state.session = {
@@ -772,10 +798,12 @@ class SupabaseSimulator {
         created_at: sbUser.created_at
       };
 
-      // Since organizations are mocked for now, map activeOrg context
-      let activeOrg: Organization | null = this.state.session?.activeOrg || null;
-      if (!activeOrg && this.state.organizations.length > 0) {
-        activeOrg = this.state.organizations[0];
+      // Since organizations are mocked for now, map activeOrg context securely
+      const userMemberships = this.state.memberships.filter(m => m.user_id === user.id);
+      let activeOrg: Organization | null = null;
+      if (userMemberships.length > 0) {
+        const orgId = userMemberships[0].organization_id;
+        activeOrg = this.state.organizations.find(o => o.id === orgId) || null;
       }
 
       this.state.session = {
